@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      margin: 0;
+    }
+    
+    h2 {
+      color: #00008b;
+      margin-top: 0;
+    }
+    
+    .search-box {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    
+    .select-controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    
+    .select-controls button {
+      padding: 8px 16px;
+      background-color: #f0f0f0;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    
+    .select-controls button:hover {
+      background-color: #e0e0e0;
+    }
+    
+    .staff-list {
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      max-height: 400px;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+    
+    .staff-item {
+      padding: 12px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .staff-item:hover {
+      background-color: #f5f5f5;
+    }
+    
+    .staff-item:last-child {
+      border-bottom: none;
+    }
+    
+    .staff-item input[type="checkbox"] {
+      margin-right: 12px;
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+    
+    .staff-info {
+      flex: 1;
+    }
+    
+    .staff-email {
+      font-weight: 500;
+      color: #333;
+    }
+    
+    .staff-details {
+      font-size: 12px;
+      color: #666;
+      margin-top: 3px;
+    }
+    
+    .no-results {
+      padding: 40px;
+      text-align: center;
+      color: #999;
+    }
+    
+    .button-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .send-button {
+      padding: 12px 24px;
+      background-color: #00008b;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .send-button:hover {
+      background-color: #0000cd;
+    }
+    
+    .send-button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    
+    .selected-count {
+      color: #666;
+      font-size: 14px;
+    }
+    
+    .status {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 4px;
+      display: none;
+    }
+    
+    .status.success {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+      display: block;
+    }
+    
+    .status.error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+      display: block;
+    }
+    
+    .status.info {
+      background-color: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+      display: block;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+    
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #00008b;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <h2>Email Room Links to Staff</h2>
+  
+  <input 
+    type="text" 
+    id="searchBox" 
+    class="search-box" 
+    placeholder="Search by email, role, or room..."
+    onkeyup="filterStaff()"
+  />
+  
+  <div class="select-controls">
+    <button onclick="selectAll()">Select All</button>
+    <button onclick="deselectAll()">Deselect All</button>
+  </div>
+  
+  <div id="staffList" class="staff-list">
+    <div class="loading">
+      <div class="spinner"></div>
+      Loading staff members...
+    </div>
+  </div>
+  
+  <div class="button-container">
+    <span id="selectedCount" class="selected-count">0 selected</span>
+    <button id="sendButton" class="send-button" onclick="sendEmails()" disabled>
+      Send Links
+    </button>
+  </div>
+  
+  <div id="status" class="status"></div>
+  
+  <script>
+    let allStaff = [];
+    let selectedEmails = new Set();
+    
+    // Load staff on page load
+    window.onload = function() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            allStaff = result.staff;
+            renderStaffList(allStaff);
+          } else {
+            showStatus('Error loading staff: ' + result.error, 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showStatus('Error: ' + error.message, 'error');
+        })
+        .getStaffEmailList();
+    };
+    
+    function renderStaffList(staff) {
+      const listContainer = document.getElementById('staffList');
+      
+      if (staff.length === 0) {
+        listContainer.innerHTML = '<div class="no-results">No staff members found</div>';
+        return;
+      }
+      
+      listContainer.innerHTML = '';
+      
+      staff.forEach(function(member) {
+        const item = document.createElement('div');
+        item.className = 'staff-item';
+        item.onclick = function(e) {
+          if (e.target.type !== 'checkbox') {
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            checkbox.checked = !checkbox.checked;
+            toggleSelection(member.email);
+          }
+        };
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = member.email;
+        checkbox.checked = selectedEmails.has(member.email);
+        checkbox.onchange = function() {
+          toggleSelection(member.email);
+        };
+        
+        const info = document.createElement('div');
+        info.className = 'staff-info';
+        info.innerHTML = `
+          <div class="staff-email">${member.email}</div>
+          <div class="staff-details">${member.role} • Room: ${member.room}</div>
+        `;
+        
+        item.appendChild(checkbox);
+        item.appendChild(info);
+        listContainer.appendChild(item);
+      });
+    }
+    
+    function toggleSelection(email) {
+      if (selectedEmails.has(email)) {
+        selectedEmails.delete(email);
+      } else {
+        selectedEmails.add(email);
+      }
+      updateSelectedCount();
+    }
+    
+    function updateSelectedCount() {
+      const count = selectedEmails.size;
+      document.getElementById('selectedCount').textContent = count + ' selected';
+      document.getElementById('sendButton').disabled = count === 0;
+    }
+    
+    function selectAll() {
+      const checkboxes = document.querySelectorAll('.staff-item input[type="checkbox"]');
+      checkboxes.forEach(function(checkbox) {
+        checkbox.checked = true;
+        selectedEmails.add(checkbox.value);
+      });
+      updateSelectedCount();
+    }
+    
+    function deselectAll() {
+      const checkboxes = document.querySelectorAll('.staff-item input[type="checkbox"]');
+      checkboxes.forEach(function(checkbox) {
+        checkbox.checked = false;
+      });
+      selectedEmails.clear();
+      updateSelectedCount();
+    }
+    
+    function filterStaff() {
+      const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+      
+      const filtered = allStaff.filter(function(member) {
+        return member.email.toLowerCase().includes(searchTerm) ||
+               member.role.toLowerCase().includes(searchTerm) ||
+               String(member.room).toLowerCase().includes(searchTerm);
+      });
+      
+      renderStaffList(filtered);
+    }
+    
+    function sendEmails() {
+      if (selectedEmails.size === 0) {
+        showStatus('Please select at least one staff member', 'error');
+        return;
+      }
+      
+      const sendButton = document.getElementById('sendButton');
+      sendButton.disabled = true;
+      sendButton.textContent = 'Sending...';
+      
+      showStatus('Sending emails, please wait...', 'info');
+      
+      google.script.run
+        .withSuccessHandler(function(result) {
+          sendButton.disabled = false;
+          sendButton.textContent = 'Send Links';
+          
+          if (result.success) {
+            let message = `✅ Successfully sent ${result.successCount} email(s).`;
+            
+            if (result.failedCount > 0) {
+              message += `\n\n❌ Failed to send ${result.failedCount} email(s):`;
+              result.failedEmails.forEach(function(failed) {
+                message += `\n• ${failed.email}: ${failed.error}`;
+              });
+              showStatus(message, 'error');
+            } else {
+              showStatus(message, 'success');
+              
+              // Clear selections after successful send
+              setTimeout(function() {
+                deselectAll();
+              }, 2000);
+            }
+          } else {
+            showStatus('Error: ' + result.error, 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          sendButton.disabled = false;
+          sendButton.textContent = 'Send Links';
+          showStatus('Error: ' + error.message, 'error');
+        })
+        .sendRoomLinks(Array.from(selectedEmails));
+    }
+    
+    function showStatus(message, type) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.textContent = message;
+      statusDiv.className = 'status ' + type;
+      statusDiv.style.whiteSpace = 'pre-line';
+    }
+  </script>
+</body>
+</html>
