@@ -190,6 +190,34 @@ const api = {
       return { success: false, error: error.message, passes: [] };
     }
   },
+  async updateArchivedPass(
+    passId,
+    roomFrom,
+    destination,
+    checkOutTime,
+    checkInTime
+  ) {
+    try {
+      const response = await fetch(API_BASE, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "updateArchivedPass",
+          passId,
+          roomFrom,
+          destination,
+          checkOutTime,
+          checkInTime,
+        }),
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error("Update archived pass error:", error);
+      return { success: false, error: error.message };
+    }
+  },
 };
 
 // Student Check-Out Component
@@ -451,10 +479,173 @@ const StudentCheckOut = ({ roomNumber }) => {
     </div>
   );
 };
+// Edit Pass Dialog Component
+const EditPassDialog = ({ pass, onClose, onSave }) => {
+  const [formData, setFormData] = useState({
+    roomFrom: pass.roomFrom || "",
+    destination: pass.destination || "",
+    checkOutTime: pass.checkOutTime
+      ? new Date(pass.checkOutTime).toLocaleTimeString("en-US", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "",
+    checkInTime: pass.checkInTime
+      ? new Date(pass.checkInTime).toLocaleTimeString("en-US", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    setSaving(true);
+
+    // Parse times and combine with today's date
+    const today = new Date(pass.checkOutTime);
+    const dateStr = today.toISOString().split("T")[0];
+
+    const checkOutDateTime = new Date(`${dateStr}T${formData.checkOutTime}:00`);
+    const checkInDateTime = formData.checkInTime
+      ? new Date(`${dateStr}T${formData.checkInTime}:00`)
+      : null;
+
+    await onSave({
+      passId: pass.id,
+      roomFrom: formData.roomFrom,
+      destination: formData.destination,
+      checkOutTime: checkOutDateTime.toISOString(),
+      checkInTime: checkInDateTime ? checkInDateTime.toISOString() : null,
+    });
+
+    setSaving(false);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-xl font-bold text-gray-800 mb-4">Edit Pass</h2>
+
+        <div className="space-y-4">
+          {/* Student Name - Read Only */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Student Name
+            </label>
+            <input
+              type="text"
+              value={pass.studentName}
+              disabled
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600"
+            />
+          </div>
+
+          {/* Room From */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              From Room
+            </label>
+            <input
+              type="text"
+              value={formData.roomFrom}
+              onChange={(e) =>
+                setFormData({ ...formData, roomFrom: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {/* Destination */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              To Destination
+            </label>
+            <input
+              type="text"
+              value={formData.destination}
+              onChange={(e) =>
+                setFormData({ ...formData, destination: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {/* Check Out Time */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Check Out Time
+            </label>
+            <input
+              type="time"
+              value={formData.checkOutTime}
+              onChange={(e) =>
+                setFormData({ ...formData, checkOutTime: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {/* Check In Time */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Check In Time{" "}
+              {pass.status === "OUT" && (
+                <span className="text-xs text-gray-500">(optional)</span>
+              )}
+            </label>
+            <input
+              type="time"
+              value={formData.checkInTime}
+              onChange={(e) =>
+                setFormData({ ...formData, checkInTime: e.target.value })
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+        </div>
+
+        {/* Buttons */}
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {saving ? (
+              <>
+                <RefreshCw size={18} className="animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Save Changes"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 // Today View Component
 const TodayView = ({ userRole, userRoom }) => {
   const [todayPasses, setTodayPasses] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [editingPass, setEditingPass] = useState(null);
   const [filterRoom, setFilterRoom] = useState("");
   const [filterDestination, setFilterDestination] = useState("");
   const [loading, setLoading] = useState(false);
@@ -518,6 +709,29 @@ const TodayView = ({ userRole, userRoom }) => {
       }
     } catch (error) {
       console.error("Error loading destinations:", error);
+    }
+  };
+
+  const handleEditPass = async (updatedData) => {
+    try {
+      const result = await api.updateArchivedPass(
+        updatedData.passId,
+        updatedData.roomFrom,
+        updatedData.destination,
+        updatedData.checkOutTime,
+        updatedData.checkInTime
+      );
+
+      if (result.success) {
+        // Reload today's passes to show updated data
+        await loadTodayPasses();
+        setEditingPass(null);
+      } else {
+        alert("Error updating pass: " + (result.error || "Unknown error"));
+      }
+    } catch (error) {
+      console.error("Error updating pass:", error);
+      alert("Error updating pass. Please try again.");
     }
   };
 
@@ -733,14 +947,26 @@ const TodayView = ({ userRole, userRoom }) => {
                     </div>
                   </div>
 
-                  <div
-                    className={`px-4 py-2 rounded-lg font-medium ${
-                      pass.status === "OUT"
-                        ? "bg-orange-100 text-orange-700"
-                        : "bg-green-100 text-green-700"
-                    }`}
-                  >
-                    {pass.status === "OUT" ? "Currently Out" : "Checked In"}
+                  <div className="flex items-center gap-2">
+                    {/* Edit Button */}
+                    <button
+                      onClick={() => setEditingPass(pass)}
+                      className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors flex items-center gap-2"
+                    >
+                      <User size={16} />
+                      Edit
+                    </button>
+
+                    {/* Status Badge */}
+                    <div
+                      className={`px-4 py-2 rounded-lg font-medium ${
+                        pass.status === "OUT"
+                          ? "bg-orange-100 text-orange-700"
+                          : "bg-green-100 text-green-700"
+                      }`}
+                    >
+                      {pass.status === "OUT" ? "Currently Out" : "Checked In"}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -748,6 +974,14 @@ const TodayView = ({ userRole, userRoom }) => {
           </div>
         )}
       </div>
+      {/* Edit Pass Dialog */}
+      {editingPass && (
+        <EditPassDialog
+          pass={editingPass}
+          onClose={() => setEditingPass(null)}
+          onSave={handleEditPass}
+        />
+      )}
     </>
   );
 };
