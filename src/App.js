@@ -384,29 +384,29 @@ const StudentCheckOut = ({ roomNumber }) => {
       }}
     >
       <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+            className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"
             style={{ backgroundColor: "#00008b" }}
           >
-            <LogOut size={32} style={{ color: "#FFD700" }} />
+            <LogOut size={24} style={{ color: "#FFD700" }} />
           </div>
           <h2
-            className="text-xl font-semibold mb-2"
+            className="text-lg font-semibold mb-1"
             style={{ color: "#00008b" }}
           >
             Olmsted Falls High School
           </h2>
           <h1
-            className="text-3xl font-bold mb-2 flex items-center justify-center gap-2"
+            className="text-2xl font-bold mb-1 flex items-center justify-center gap-2"
             style={{ color: "#00008b" }}
           >
             🐾 Hall Pass 🐾
           </h1>
-          <p className="text-gray-600">Room {roomNumber}</p>
+          <p className="text-gray-600 text-sm">Room {roomNumber}</p>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Student ID
@@ -426,26 +426,34 @@ const StudentCheckOut = ({ roomNumber }) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Destination
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Where are you going?
             </label>
-            <select
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 capitalize"
-              disabled={loading}
-            >
-              <option value="">Select destination...</option>
+            <div className="space-y-2">
               {destinations.map((dest) => (
-                <option
+                <label
                   key={dest}
-                  value={dest.toLowerCase()}
-                  className="capitalize"
+                  className={`flex items-center p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                    destination === dest.toLowerCase()
+                      ? "border-indigo-600 bg-indigo-50"
+                      : "border-gray-300 bg-white hover:border-indigo-300 hover:bg-gray-50"
+                  } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
                 >
-                  {dest}
-                </option>
+                  <input
+                    type="radio"
+                    name="destination"
+                    value={dest.toLowerCase()}
+                    checked={destination === dest.toLowerCase()}
+                    onChange={(e) => setDestination(e.target.value)}
+                    disabled={loading}
+                    className="w-5 h-5 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <span className="ml-3 text-lg font-medium text-gray-900 capitalize">
+                    {dest}
+                  </span>
+                </label>
               ))}
-            </select>
+            </div>
           </div>
 
           {destination === "other" && (
