@@ -218,6 +218,20 @@ const api = {
       return { success: false, error: error.message };
     }
   },
+  async getStaffDropdownList() {
+    try {
+      const params = new URLSearchParams({
+        action: "getStaffDropdownList",
+      });
+
+      const response = await fetch(`${API_BASE}?${params}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Get staff dropdown error:", error);
+      return { success: false, error: error.message, staffList: [] };
+    }
+  },
 };
 
 // Student Check-Out Component
@@ -228,6 +242,9 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [destinations, setDestinations] = useState([]); // Add this
+  const [staffList, setStaffList] = useState([]);
+  const [filteredStaff, setFilteredStaff] = useState([]);
+  const [showStaffDropdown, setShowStaffDropdown] = useState(false);
 
   // Load destinations on mount
   useEffect(() => {
@@ -239,6 +256,13 @@ const StudentCheckOut = ({ roomNumber }) => {
       const result = await api.getDestinationList();
       if (result.success) {
         setDestinations(result.destinations || []);
+      }
+
+      // Also load staff list
+      const staffResult = await api.getStaffDropdownList();
+      if (staffResult.success) {
+        setStaffList(staffResult.staffList || []);
+        setFilteredStaff(staffResult.staffList || []);
       }
     } catch (error) {
       console.error("Error loading destinations:", error);
@@ -253,6 +277,25 @@ const StudentCheckOut = ({ roomNumber }) => {
         "Other",
       ]);
     }
+  };
+
+  const handleStaffSearch = (searchText) => {
+    setCustomDestination(searchText);
+
+    if (searchText === "") {
+      setFilteredStaff(staffList);
+    } else {
+      const filtered = staffList.filter((staff) =>
+        staff.toLowerCase().includes(searchText.toLowerCase())
+      );
+      setFilteredStaff(filtered);
+    }
+    setShowStaffDropdown(true);
+  };
+
+  const selectStaff = (staff) => {
+    setCustomDestination(staff);
+    setShowStaffDropdown(false);
   };
 
   const handleSubmit = async () => {
@@ -406,19 +449,43 @@ const StudentCheckOut = ({ roomNumber }) => {
           </div>
 
           {destination === "other" && (
-            <div>
+            <div className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Specify Location
+                Select Staff Member
               </label>
               <input
                 type="text"
                 value={customDestination}
-                onChange={(e) => setCustomDestination(e.target.value)}
+                onChange={(e) => handleStaffSearch(e.target.value)}
+                onFocus={() => setShowStaffDropdown(true)}
                 onKeyPress={handleKeyPress}
-                placeholder="Enter location"
+                placeholder="Search by name or room..."
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 disabled={loading}
               />
+
+              {/* Dropdown list */}
+              {showStaffDropdown && filteredStaff.length > 0 && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                  {filteredStaff.map((staff, index) => (
+                    <div
+                      key={index}
+                      onClick={() => selectStaff(staff)}
+                      className="px-4 py-2 hover:bg-indigo-50 cursor-pointer transition-colors"
+                    >
+                      {staff}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Close dropdown when clicking outside */}
+              {showStaffDropdown && (
+                <div
+                  className="fixed inset-0 z-0"
+                  onClick={() => setShowStaffDropdown(false)}
+                />
+              )}
             </div>
           )}
 
