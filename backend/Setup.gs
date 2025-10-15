@@ -268,7 +268,8 @@ function onOpen() {
     .addItem('👥 View Active Passes', 'showActivePasses')
     .addItem('📊 Generate Analytics Report', 'generateAnalyticsReport')
     .addSeparator()
-    .addItem('📧 Email Room Links', 'showEmailLinksDialog')  // ← ADD THIS
+    .addItem('📧 Email Room Links', 'showEmailLinksDialog')
+    .addItem('🔄 Refresh Staff Dropdown Cache', 'refreshStaffDropdownCache')  // ← ADD THIS
     .addSeparator()
     .addItem('💾 Create Backup', 'createBackup')
     .addItem('🔍 System Health Check', 'showHealthCheck')

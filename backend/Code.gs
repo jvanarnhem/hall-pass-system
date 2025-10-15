@@ -53,6 +53,9 @@ function handleRequest(e, method) {
       case "getAnalytics":
         result = getAnalytics(params.days || 30);
         break;
+      case "getStaffDropdownList":
+        result = getStaffDropdownList();
+        break;
       case "updateArchivedPass":
         result = updateArchivedPass(params);
         break;
@@ -1056,4 +1059,112 @@ function updateArchivedPass(params) {
     checkInTime: newCheckInTime ? newCheckInTime.toISOString() : null,
     duration: durationMinutes,
   };
+}
+
+// ============================================
+// GET STAFF DROPDOWN LIST (with caching)
+// ============================================
+
+function getStaffDropdownList() {
+  try {
+    const cache = CacheService.getScriptCache();
+
+    // Try to get from cache first
+    const cached = cache.get("staffDropdownList");
+    if (cached) {
+      Logger.log("Returning cached staff dropdown list");
+      return JSON.parse(cached);
+    }
+
+    // If not in cache, get from sheet
+    Logger.log("Cache miss - loading from sheet");
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configData = configSheet.getDataRange().getValues();
+
+    const staffList = [];
+
+    // Get all staff from column E (Dropdown) where Type=STAFF
+    for (let i = 1; i < configData.length; i++) {
+      if (configData[i][0] === "STAFF" && configData[i][4]) {
+        // Column E is index 4
+        const dropdownValue = configData[i][4].toString().trim();
+        if (dropdownValue) {
+          staffList.push(dropdownValue);
+        }
+      }
+    }
+
+    // Sort alphabetically
+    staffList.sort();
+
+    Logger.log("Found " + staffList.length + " staff members");
+
+    const result = {
+      success: true,
+      staffList: staffList,
+      count: staffList.length,
+      cached: false,
+    };
+
+    // Cache for 6 hours (21600 seconds)
+    cache.put("staffDropdownList", JSON.stringify(result), 21600);
+
+    return result;
+  } catch (error) {
+    Logger.log("Error getting staff dropdown list: " + error.toString());
+    return {
+      success: false,
+      error: error.toString(),
+      staffList: [],
+    };
+  }
+}
+
+// ============================================
+// REFRESH STAFF DROPDOWN CACHE
+// ============================================
+
+function refreshStaffDropdownCache() {
+  try {
+    const cache = CacheService.getScriptCache();
+
+    // Clear the cache
+    cache.remove("staffDropdownList");
+    Logger.log("Cache cleared");
+
+    // Reload and cache
+    const result = getStaffDropdownList();
+
+    // Show success message in spreadsheet
+    const ui = SpreadsheetApp.getUi();
+    ui.alert(
+      "Cache Refreshed",
+      "Staff dropdown list updated successfully!\n\n" +
+        "Found " +
+        result.count +
+        " staff members.",
+      ui.ButtonSet.OK
+    );
+
+    return {
+      success: true,
+      message: "Cache refreshed successfully",
+      count: result.count,
+    };
+  } catch (error) {
+    Logger.log("Error refreshing cache: " + error.toString());
+
+    const ui = SpreadsheetApp.getUi();
+    ui.alert(
+      "Error",
+      "Failed to refresh cache: " + error.toString(),
+      ui.ButtonSet.OK
+    );
+
+    return {
+      success: false,
+      error: error.toString(),
+    };
+  }
 }
