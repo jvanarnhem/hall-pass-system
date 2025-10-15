@@ -1159,14 +1159,27 @@ const Dashboard = ({ userRole, userRoom, userEmail }) => {
       pass.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       String(pass.studentId).includes(searchTerm);
 
-    // Convert both to strings for comparison
-    const matchesRoom =
-      filterRoom === "" || String(pass.roomFrom) === filterRoom;
+    // Enhanced room matching: matches origin OR destination
+    let matchesRoom = filterRoom === "";
+    if (!matchesRoom && filterRoom !== "") {
+      // Check if room FROM matches
+      const matchesOrigin = String(pass.roomFrom) === filterRoom;
+
+      // Check if destination contains the room number/name
+      // Extract text from parentheses in destination (e.g., "VanArnhem (603)" -> "603")
+      const destinationMatch = pass.destination.match(/\(([^)]+)\)/);
+      const destinationRoom = destinationMatch
+        ? destinationMatch[1]
+        : pass.destination;
+      const matchesDestination = destinationRoom === filterRoom;
+
+      matchesRoom = matchesOrigin || matchesDestination;
+    }
 
     const matchesDestination =
-      filterDestination === "" || pass.destination === filterDestination;
+      filterDestination === "" ||
+      pass.destination.toLowerCase().includes(filterDestination.toLowerCase());
 
-    // Remove the permission filter - all staff can view all passes
     return matchesSearch && matchesRoom && matchesDestination;
   });
 
@@ -1338,64 +1351,198 @@ const Dashboard = ({ userRole, userRoom, userEmail }) => {
                 </div>
               ) : (
                 <div className="divide-y max-h-[600px] overflow-y-auto">
-                  {filteredPasses.map((pass) => (
-                    <div
-                      key={pass.id}
-                      className="p-4 hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className="bg-indigo-100 text-indigo-700 w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm">
-                              {pass.studentName
-                                .split(" ")
-                                .map((n) => n[0])
-                                .join("")}
-                            </div>
-                            <div>
-                              <h3 className="font-semibold text-gray-800">
-                                {pass.studentName}
-                              </h3>
-                              <p className="text-sm text-gray-600">
-                                ID: {pass.studentId}
-                              </p>
-                            </div>
-                          </div>
+                  {/* Students FROM the filtered room */}
+                  {(() => {
+                    const fromRoomPasses = filteredPasses.filter(
+                      (pass) =>
+                        String(pass.roomFrom) === filterRoom &&
+                        filterRoom !== ""
+                    );
 
-                          <div className="flex flex-wrap gap-4 text-sm ml-13">
-                            <div className="flex items-center gap-1 text-gray-600">
-                              <MapPin size={16} className="text-gray-400" />
-                              <span>From Room {pass.roomFrom}</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-indigo-600">
-                              <MapPin size={16} className="text-indigo-500" />
-                              <span className="capitalize">
-                                To {pass.destination}
-                              </span>
-                            </div>
-                            <div
-                              className={`flex items-center gap-1 ${getTimeColor(
-                                pass.checkOutTime
-                              )}`}
-                            >
-                              <Clock size={16} />
-                              <span>{getTimeSince(pass.checkOutTime)}</span>
-                            </div>
-                          </div>
-                        </div>
+                    const toRoomPasses = filteredPasses.filter((pass) => {
+                      if (filterRoom === "") return false;
+                      const destinationMatch =
+                        pass.destination.match(/\(([^)]+)\)/);
+                      const destinationRoom = destinationMatch
+                        ? destinationMatch[1]
+                        : pass.destination;
+                      return (
+                        destinationRoom === filterRoom &&
+                        String(pass.roomFrom) !== filterRoom
+                      );
+                    });
 
-                        <button
-                          onClick={() =>
-                            handleCheckIn(pass.id, pass.studentName)
-                          }
-                          className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
-                        >
-                          <CheckCircle size={18} />
-                          Check In
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    const otherPasses = filteredPasses.filter((pass) => {
+                      if (filterRoom === "") return true;
+                      const destinationMatch =
+                        pass.destination.match(/\(([^)]+)\)/);
+                      const destinationRoom = destinationMatch
+                        ? destinationMatch[1]
+                        : pass.destination;
+                      const isFromRoom = String(pass.roomFrom) === filterRoom;
+                      const isToRoom = destinationRoom === filterRoom;
+                      return !isFromRoom && !isToRoom;
+                    });
+
+                    return (
+                      <>
+                        {/* Section 1: From filtered room (or all if no filter) */}
+                        {(filterRoom === "" ? filteredPasses : fromRoomPasses)
+                          .length > 0 && (
+                          <>
+                            {filterRoom !== "" && (
+                              <div className="p-3 bg-orange-100 border-b-2 border-orange-300 font-semibold text-orange-800 flex items-center gap-2">
+                                <MapPin size={18} />
+                                From Room {filterRoom} ({fromRoomPasses.length})
+                              </div>
+                            )}
+                            {(filterRoom === ""
+                              ? filteredPasses
+                              : fromRoomPasses
+                            ).map((pass) => (
+                              <div
+                                key={pass.id}
+                                className="p-4 hover:bg-gray-50 transition-colors"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-3 mb-2">
+                                      <div className="bg-indigo-100 text-indigo-700 w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm">
+                                        {pass.studentName
+                                          .split(" ")
+                                          .map((n) => n[0])
+                                          .join("")}
+                                      </div>
+                                      <div>
+                                        <h3 className="font-semibold text-gray-800">
+                                          {pass.studentName}
+                                        </h3>
+                                        <p className="text-sm text-gray-600">
+                                          ID: {pass.studentId}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-4 text-sm ml-13">
+                                      <div className="flex items-center gap-1 text-gray-600">
+                                        <MapPin
+                                          size={16}
+                                          className="text-gray-400"
+                                        />
+                                        <span>From Room {pass.roomFrom}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1 text-indigo-600">
+                                        <MapPin
+                                          size={16}
+                                          className="text-indigo-500"
+                                        />
+                                        <span className="capitalize">
+                                          To {pass.destination}
+                                        </span>
+                                      </div>
+                                      <div
+                                        className={`flex items-center gap-1 ${getTimeColor(
+                                          pass.checkOutTime
+                                        )}`}
+                                      >
+                                        <Clock size={16} />
+                                        <span>
+                                          {getTimeSince(pass.checkOutTime)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() =>
+                                      handleCheckIn(pass.id, pass.studentName)
+                                    }
+                                    className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
+                                  >
+                                    <CheckCircle size={18} />
+                                    Check In
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </>
+                        )}
+
+                        {/* Section 2: Coming TO filtered room */}
+                        {toRoomPasses.length > 0 && (
+                          <>
+                            <div className="p-3 bg-blue-100 border-b-2 border-blue-300 font-semibold text-blue-800 flex items-center gap-2">
+                              <MapPin size={18} />
+                              Coming to Room {filterRoom} ({toRoomPasses.length}
+                              )
+                            </div>
+                            {toRoomPasses.map((pass) => (
+                              <div
+                                key={pass.id}
+                                className="p-4 bg-blue-50 hover:bg-blue-100 transition-colors"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-3 mb-2">
+                                      <div className="bg-blue-100 text-blue-700 w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm">
+                                        {pass.studentName
+                                          .split(" ")
+                                          .map((n) => n[0])
+                                          .join("")}
+                                      </div>
+                                      <div>
+                                        <h3 className="font-semibold text-gray-800">
+                                          {pass.studentName}
+                                        </h3>
+                                        <p className="text-sm text-gray-600">
+                                          ID: {pass.studentId}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-4 text-sm ml-13">
+                                      <div className="flex items-center gap-1 text-gray-600">
+                                        <MapPin
+                                          size={16}
+                                          className="text-gray-400"
+                                        />
+                                        <span>From Room {pass.roomFrom}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1 text-blue-600">
+                                        <MapPin
+                                          size={16}
+                                          className="text-blue-500"
+                                        />
+                                        <span className="capitalize">
+                                          To {pass.destination}
+                                        </span>
+                                      </div>
+                                      <div
+                                        className={`flex items-center gap-1 ${getTimeColor(
+                                          pass.checkOutTime
+                                        )}`}
+                                      >
+                                        <Clock size={16} />
+                                        <span>
+                                          {getTimeSince(pass.checkOutTime)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() =>
+                                      handleCheckIn(pass.id, pass.studentName)
+                                    }
+                                    className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
+                                  >
+                                    <CheckCircle size={18} />
+                                    Check In
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>
