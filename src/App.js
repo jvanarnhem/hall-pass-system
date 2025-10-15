@@ -590,7 +590,7 @@ const EditPassDialog = ({ pass, onClose, onSave }) => {
               onChange={(e) =>
                 setFormData({ ...formData, checkOutTime: e.target.value })
               }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             />
           </div>
 
@@ -608,7 +608,7 @@ const EditPassDialog = ({ pass, onClose, onSave }) => {
               onChange={(e) =>
                 setFormData({ ...formData, checkInTime: e.target.value })
               }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             />
           </div>
         </div>
