@@ -20,20 +20,19 @@ function showAdminInterface() {
 // ============================================
 
 function getDashboardStats() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  
+
   // Total students
-  const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
+  const rosterSheet = SS.getSheetByName(SHEET_NAMES.ROSTER);
   const rosterData = rosterSheet.getDataRange().getValues();
   const totalStudents = rosterData.length - 1; // Exclude header
   
   // Active passes
-  const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
+  const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
   const activeData = activeSheet.getDataRange().getValues();
   const activePasses = activeData.length - 1;
   
   // Today's passes (from archive)
-  const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+  const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
   const archiveData = archiveSheet.getDataRange().getValues();
   
   const today = new Date();
@@ -71,8 +70,7 @@ function getDashboardStats() {
 
 function addNewStudent(studentId, studentName, grade) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
+    const rosterSheet = SS.getSheetByName(SHEET_NAMES.ROSTER);
     
     // Check if student ID already exists
     const data = rosterSheet.getDataRange().getValues();
@@ -102,8 +100,7 @@ function addNewStudent(studentId, studentName, grade) {
 }
 
 function getRosterData() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
+  const rosterSheet = SS.getSheetByName(SHEET_NAMES.ROSTER);
   const data = rosterSheet.getDataRange().getValues();
   
   const roster = [];
@@ -126,8 +123,7 @@ function getRosterData() {
 
 function updateStudent(studentId, updates) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
+    const rosterSheet = SS.getSheetByName(SHEET_NAMES.ROSTER);
     const data = rosterSheet.getDataRange().getValues();
     
     for (let i = 1; i < data.length; i++) {
@@ -159,8 +155,7 @@ function updateStudent(studentId, updates) {
 
 function deleteStudent(studentId) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
+    const rosterSheet = SS.getSheetByName(SHEET_NAMES.ROSTER);
     const data = rosterSheet.getDataRange().getValues();
     
     for (let i = 1; i < data.length; i++) {
@@ -192,8 +187,7 @@ function deleteStudent(studentId) {
 
 function addStaffMember(email, role, room = null) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     
     // Check if staff member already exists
     const data = configSheet.getDataRange().getValues();
@@ -223,8 +217,7 @@ function addStaffMember(email, role, room = null) {
 }
 
 function getStaffList() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+  const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
   const data = configSheet.getDataRange().getValues();
   
   const staff = [];
@@ -247,8 +240,7 @@ function getStaffList() {
 
 function removeStaffMember(email) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     const data = configSheet.getDataRange().getValues();
     
     for (let i = 1; i < data.length; i++) {
@@ -279,8 +271,7 @@ function removeStaffMember(email) {
 // ============================================
 
 function generateCustomReport(reportType, startDate, endDate) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+  const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
   const data = archiveSheet.getDataRange().getValues();
   
   const start = startDate ? new Date(startDate) : new Date(0);
@@ -354,8 +345,7 @@ function getFrequentPassUsers(days = 30, threshold = 10) {
 }
 
 function getStudentDetailedReport(studentId, days = 30) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+  const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
   const data = archiveSheet.getDataRange().getValues();
   
   const now = new Date();
@@ -430,8 +420,7 @@ function exportMonthData() {
 // ============================================
 
 function getSystemSettings() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+  const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
   const data = configSheet.getDataRange().getValues();
   
   const settings = {};
@@ -450,8 +439,7 @@ function getSystemSettings() {
 
 function updateSystemSetting(settingName, value) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     const data = configSheet.getDataRange().getValues();
     
     // Check if setting exists
@@ -487,14 +475,13 @@ function updateSystemSetting(settingName, value) {
 
 function archiveDataByDate(beforeDate) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+    const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
     
     // Create new archive sheet with timestamp
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
     const newSheetName = `Archive_${timestamp}`;
     
-    const newSheet = ss.insertSheet(newSheetName);
+    const newSheet = SS.insertSheet(newSheetName);
     
     // Copy data older than specified date
     const data = archiveSheet.getDataRange().getValues();
@@ -539,7 +526,6 @@ function archiveDataByDate(beforeDate) {
 }
 
 function getSystemHealthCheck() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   
   const health = {
     sheetsPresent: true,
@@ -554,7 +540,7 @@ function getSystemHealthCheck() {
     // Check all sheets exist
     const requiredSheets = ['StudentRoster', 'ActivePasses', 'Archive', 'Config'];
     requiredSheets.forEach(sheetName => {
-      if (!ss.getSheetByName(sheetName)) {
+      if (!SS.getSheetByName(sheetName)) {
         health.sheetsPresent = false;
         health.errors.push(`Missing sheet: ${sheetName}`);
       }
@@ -562,16 +548,16 @@ function getSystemHealthCheck() {
     
     // Count records
     if (health.sheetsPresent) {
-      health.rosterCount = ss.getSheetByName('StudentRoster').getLastRow() - 1;
-      health.activeCount = ss.getSheetByName('ActivePasses').getLastRow() - 1;
-      health.archiveCount = ss.getSheetByName('Archive').getLastRow() - 1;
+      health.rosterCount = SS.getSheetByName('StudentRoster').getLastRow() - 1;
+      health.activeCount = SS.getSheetByName('ActivePasses').getLastRow() - 1;
+      health.archiveCount = SS.getSheetByName('Archive').getLastRow() - 1;
       
-      const configData = ss.getSheetByName('Config').getDataRange().getValues();
+      const configData = SS.getSheetByName('Config').getDataRange().getValues();
       health.staffCount = configData.filter(row => row[0] === 'STAFF').length;
     }
     
     // Check for any passes that have been out too long
-    const activeSheet = ss.getSheetByName('ActivePasses');
+    const activeSheet = SS.getSheetByName('ActivePasses');
     const activeData = activeSheet.getDataRange().getValues();
     const now = new Date();
     
@@ -604,11 +590,10 @@ function getSystemHealthCheck() {
 
 function createBackup() {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HHmmss');
     
     // Create a copy of the spreadsheet
-    const backup = ss.copy(`Hall Pass Backup - ${timestamp}`);
+    const backup = SS.copy(`Hall Pass Backup - ${timestamp}`);
     
     return {
       success: true,
@@ -667,8 +652,7 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
     
     Logger.log('Exporting from ' + startDate + ' to ' + endDate);
     
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+    const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
     const data = archiveSheet.getDataRange().getValues();
     
     // Filter data by date range (inclusive)
@@ -709,7 +693,7 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
     
     // Create temporary sheet for export
     const tempSheetName = 'Export_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd-yyyy_HHmmss');
-    const tempSheet = ss.insertSheet(tempSheetName);
+    const tempSheet = SS.insertSheet(tempSheetName);
     
     // Write filtered data
     tempSheet.getRange(1, 1, filtered.length, filtered[0].length).setValues(filtered);
@@ -763,7 +747,7 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
     tempSheet.insertRowBefore(4); // Blank row
     
     // Create PDF
-    const url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=pdf&gid=' + tempSheet.getSheetId() +
+    const url = 'https://docs.google.com/spreadsheets/d/' + SS.getId() + '/export?format=pdf&gid=' + tempSheet.getSheetId() +
       '&portrait=false' + // Landscape
       '&fitw=true' + // Fit to width
       '&gridlines=true' + // Show gridlines
@@ -783,7 +767,7 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
     const base64Data = Utilities.base64Encode(pdfBlob.getBytes());
     
     // Delete temporary sheet
-    ss.deleteSheet(tempSheet);
+    SS.deleteSheet(tempSheet);
     
     return {
       success: true,

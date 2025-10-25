@@ -12,8 +12,7 @@ function showEmailLinksDialog() {
 
 function getStaffEmailList() {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
     
     const staffList = [];
@@ -44,8 +43,7 @@ function getStaffEmailList() {
 
 function sendRoomLinks(selectedEmails) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
     
     const results = {

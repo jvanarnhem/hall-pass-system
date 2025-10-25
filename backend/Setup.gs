@@ -7,7 +7,6 @@
  * with the correct structure and initial data
  */
 function initialSetup() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   Logger.log('Checking if setup has already been run...');
 
@@ -16,7 +15,7 @@ function initialSetup() {
   const existingSheets = [];
 
   requiredSheets.forEach(sheetName => {
-    if (ss.getSheetByName(sheetName)) {
+    if (SS.getSheetByName(sheetName)) {
       existingSheets.push(sheetName);
     }
   });
@@ -269,7 +268,10 @@ function onOpen() {
     .addItem('📊 Generate Analytics Report', 'generateAnalyticsReport')
     .addSeparator()
     .addItem('📧 Email Room Links', 'showEmailLinksDialog')
-    .addItem('🔄 Refresh Staff Dropdown Cache', 'refreshStaffDropdownCache')  // ← ADD THIS
+    .addItem('🔄 Refresh Staff Dropdown Cache', 'refreshStaffDropdownCache')
+    .addSeparator()
+    .addItem('✅ Enable Checkouts', 'enableCheckouts')
+    .addItem('⛔ Disable Checkouts', 'disableCheckouts')
     .addSeparator()
     .addItem('💾 Create Backup', 'createBackup')
     .addItem('🔍 System Health Check', 'showHealthCheck')
@@ -464,8 +466,7 @@ function exportToNewSheet(dateRange) {
   const data = exportArchiveData(dates[0], dates[1]);
 
   if (data.success) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const newSheet = ss.insertSheet('Export_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HHmmss'));
+    const newSheet = SS.insertSheet('Export_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HHmmss'));
 
     newSheet.getRange(1, 1, data.data.length, data.data[0].length).setValues(data.data);
 
@@ -547,13 +548,12 @@ function showDeploymentInstructions() {
  * Quick test to verify setup
  */
 function testSetup() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   const requiredSheets = ['StudentRoster', 'ActivePasses', 'Archive', 'Config'];
   let allPresent = true;
 
   requiredSheets.forEach(sheetName => {
-    if (!ss.getSheetByName(sheetName)) {
+    if (!SS.getSheetByName(sheetName)) {
       Logger.log(`Missing sheet: ${sheetName}`);
       allPresent = false;
     }
@@ -580,8 +580,7 @@ function clearActivePasses() {
   );
 
   if (response == ui.Button.YES) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName('ActivePasses');
+    const sheet = SS.getSheetByName('ActivePasses');
     const lastRow = sheet.getLastRow();
 
     if (lastRow > 1) {
@@ -616,22 +615,20 @@ function resetPassSheets() {
     return;
   }
   
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    
+  try {    
     // Delete and recreate ActivePasses
     Logger.log('Resetting ActivePasses...');
-    const activeSheet = ss.getSheetByName('ActivePasses');
+    const activeSheet = SS.getSheetByName('ActivePasses');
     if (activeSheet) {
-      ss.deleteSheet(activeSheet);
+      SS.deleteSheet(activeSheet);
     }
     createActivePassesSheet(ss);
     
     // Delete and recreate Archive
     Logger.log('Resetting Archive...');
-    const archiveSheet = ss.getSheetByName('Archive');
+    const archiveSheet = SS.getSheetByName('Archive');
     if (archiveSheet) {
-      ss.deleteSheet(archiveSheet);
+      SS.deleteSheet(archiveSheet);
     }
     createArchiveSheet(ss);
     
@@ -652,8 +649,7 @@ function resetPassSheets() {
 }
 
 function debugActivePasses() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
+  const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
   const data = activeSheet.getDataRange().getValues();
   
   Logger.log('=== DEBUGGING ACTIVE PASSES ===');
@@ -668,8 +664,7 @@ function debugActivePasses() {
 }
 
 function debugRoomFormats() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+  const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
   const configData = configSheet.getDataRange().getValues();
   
   Logger.log('=== STAFF ROOMS ===');
@@ -680,11 +675,58 @@ function debugRoomFormats() {
   }
   
   // Also check an active pass
-  const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
+  const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
   const activeData = activeSheet.getDataRange().getValues();
   
   Logger.log('\n=== ACTIVE PASS ROOMS ===');
   for (let i = 1; i < activeData.length; i++) {
     Logger.log('Pass ' + activeData[i][1] + ' | Room: "' + activeData[i][4] + '" (type: ' + typeof activeData[i][4] + ')');
+  }
+}
+
+// ============================================
+// ENABLE/DISABLE CHECKOUTS
+// ============================================
+
+function enableCheckouts() {
+  updateCheckoutSetting(true);
+}
+
+function disableCheckouts() {
+  updateCheckoutSetting(false);
+}
+
+function updateCheckoutSetting(enabled) {
+  try {
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
+    const configData = configSheet.getDataRange().getValues();
+    
+    // Find CHECKOUT_ENABLED setting
+    let found = false;
+    for (let i = 1; i < configData.length; i++) {
+      if (configData[i][0] === 'SETTING' && configData[i][1] === 'CHECKOUT_ENABLED') {
+        configSheet.getRange(i + 1, 3).setValue(enabled ? 'TRUE' : 'FALSE');
+        found = true;
+        break;
+      }
+    }
+    
+    // If not found, add it
+    if (!found) {
+      configSheet.appendRow(['SETTING', 'CHECKOUT_ENABLED', enabled ? 'TRUE' : 'FALSE', '', '']);
+    }
+    
+    const ui = SpreadsheetApp.getUi();
+    ui.alert(
+      enabled ? 'Checkouts Enabled' : 'Checkouts Disabled',
+      enabled 
+        ? '✅ Students can now check out.' 
+        : '⛔ Checkouts are now disabled.\n\nStudents will see a message that hall passes are not available.',
+      ui.ButtonSet.OK
+    );
+    
+  } catch (error) {
+    Logger.log('Error updating checkout setting: ' + error.toString());
+    SpreadsheetApp.getUi().alert('Error', 'Failed to update setting: ' + error.toString(), SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }

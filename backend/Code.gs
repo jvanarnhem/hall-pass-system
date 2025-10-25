@@ -11,6 +11,7 @@ const SHEET_NAMES = {
   ARCHIVE: "Archive",
   CONFIG: "Config",
 };
+const SS = SpreadsheetApp.getActiveSpreadsheet();
 
 // ============================================
 // WEB APP ENTRY POINTS
@@ -115,30 +116,43 @@ function authenticateUser() {
   };
 }
 
+// Helper function to get a staff map. This can be cached!
+function getStaffMap() {
+  const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
+  const configData = configSheet.getDataRange().getValues();
+
+  // Create a Map
+  const staffMap = new Map();
+
+  // Loop ONCE to build the map
+  for (let i = 1; i < configData.length; i++) {
+    if (configData[i][0] === "STAFF" && configData[i][1]) {
+      // Key: email, Value: {role, room}
+      staffMap.set(configData[i][1], {
+        role: configData[i][2],
+        room: configData[i][3] || null,
+      });
+    }
+  }
+  return staffMap;
+}
+
 function verifyStaffEmail(email) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
-    const configData = configSheet.getDataRange().getValues();
-
     Logger.log("Verifying email: " + email);
+    const staffMap = getStaffMap();
 
-    // Look for user in authorization list
-    for (let i = 1; i < configData.length; i++) {
-      if (configData[i][0] === "STAFF" && configData[i][1] === email) {
-        return {
-          success: true,
-          role: configData[i][2],
-          room: configData[i][3] || null,
-        };
-      }
+    // FAST: Instant lookup, no loop!
+    if (staffMap.has(email)) {
+      const staffInfo = staffMap.get(email);
+      return {
+        success: true,
+        role: staffInfo.role,
+        room: staffInfo.room,
+      };
     }
 
-    Logger.log("Email not found in Config");
-    return {
-      success: false,
-      error: "Email not authorized",
-    };
+    return { success: false, error: "Email not authorized" };
   } catch (error) {
     Logger.log("Error verifying email: " + error.toString());
     return {
@@ -151,8 +165,7 @@ function verifyStaffEmail(email) {
 function getUserRole(email) {
   // Check if user is authorized
   // This should be configured in your Config sheet
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+  const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
   const configData = configSheet.getDataRange().getValues();
 
   // Look for user in authorization list
@@ -232,8 +245,7 @@ function handleCheckOut(params) {
       checkOutTime.getSeconds() / 3600) /
     24;
 
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
+  const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
 
   // Append the row
   activeSheet.appendRow([
@@ -276,9 +288,8 @@ function handleCheckIn(params) {
     return { success: false, error: "Pass ID is required" };
   }
 
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
-  const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+  const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
+  const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
 
   // Find the pass
   const activeData = activeSheet.getDataRange().getValues();
@@ -381,8 +392,7 @@ function handleCheckIn(params) {
 
 function getActivePasses(params) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
+    const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
     const data = activeSheet.getDataRange().getValues();
 
     Logger.log("Total rows in ActivePasses: " + data.length);
@@ -445,8 +455,7 @@ function getActivePasses(params) {
 // ============================================
 
 function getAnalytics(days) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+  const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
   const data = archiveSheet.getDataRange().getValues();
 
   const now = new Date();
@@ -532,8 +541,7 @@ function getAnalytics(days) {
 
 function getRoomList() {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
 
     const roomSet = new Set(); // Use Set to automatically handle duplicates
@@ -600,8 +608,7 @@ function getRoomList() {
 
 function getDestinationList() {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
 
     const destinations = [];
@@ -651,8 +658,7 @@ function getStudentName(studentId) {
 }
 
 function getStudentNameFromRoster(studentId) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
+  const rosterSheet = SS.getSheetByName(SHEET_NAMES.ROSTER);
   const data = rosterSheet.getDataRange().getValues();
 
   for (let i = 1; i < data.length; i++) {
@@ -666,8 +672,7 @@ function getStudentNameFromRoster(studentId) {
 
 function importRosterCSV(csvData) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
+    const rosterSheet = SS.getSheetByName(SHEET_NAMES.ROSTER);
 
     // Parse CSV
     const rows = Utilities.parseCsv(csvData);
@@ -744,8 +749,7 @@ function importRosterCSV(csvData) {
 // ============================================
 
 function exportArchiveData(startDate, endDate) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+  const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
   const data = archiveSheet.getDataRange().getValues();
 
   const start = startDate ? new Date(startDate) : new Date(0);
@@ -779,8 +783,7 @@ function generatePassId() {
 }
 
 function findActivePassByStudentId(studentId) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
+  const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
   const data = activeSheet.getDataRange().getValues();
 
   for (let i = 1; i < data.length; i++) {
@@ -810,9 +813,8 @@ function logActivity(action, studentId, studentName, room, destination) {
 
 function getTodayPasses(params) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
-    const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+    const activeSheet = SS.getSheetByName(SHEET_NAMES.ACTIVE);
+    const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -986,8 +988,7 @@ function updateArchivedPass(params) {
     return { success: false, error: "Pass ID is required" };
   }
 
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+  const archiveSheet = SS.getSheetByName(SHEET_NAMES.ARCHIVE);
 
   // Find the pass in Archive
   const archiveData = archiveSheet.getDataRange().getValues();
@@ -1078,8 +1079,7 @@ function getStaffDropdownList() {
 
     // If not in cache, get from sheet
     Logger.log("Cache miss - loading from sheet");
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
 
     const staffList = [];
@@ -1165,6 +1165,56 @@ function refreshStaffDropdownCache() {
     return {
       success: false,
       error: error.toString(),
+    };
+  }
+}
+
+// ============================================
+// GET SYSTEM SETTINGS
+// ============================================
+
+function getSystemSettings() {
+  try {
+    const configSheet = SS.getSheetByName(SHEET_NAMES.CONFIG);
+    const configData = configSheet.getDataRange().getValues();
+    
+    const settings = {
+      checkoutEnabled: true,
+      maxCheckoutMinutes: 30,
+      dayEnd: '2:46 PM'
+    };
+    
+    // Read settings from Config sheet
+    for (let i = 1; i < configData.length; i++) {
+      if (configData[i][0] === 'SETTING') {
+        const settingName = configData[i][1];
+        const settingValue = configData[i][2];
+        
+        if (settingName === 'CHECKOUT_ENABLED') {
+          settings.checkoutEnabled = settingValue.toString().toUpperCase() === 'TRUE';
+        } else if (settingName === 'MAX_CHECKOUT_MINUTES') {
+          settings.maxCheckoutMinutes = parseInt(settingValue) || 30;
+        } else if (settingName === 'DAY_END') {
+          settings.dayEnd = settingValue.toString();
+        }
+      }
+    }
+    
+    return {
+      success: true,
+      settings: settings
+    };
+    
+  } catch (error) {
+    Logger.log('Error getting system settings: ' + error.toString());
+    return {
+      success: false,
+      error: error.toString(),
+      settings: {
+        checkoutEnabled: true,
+        maxCheckoutMinutes: 30,
+        dayEnd: '2:46 PM'
+      }
     };
   }
 }
