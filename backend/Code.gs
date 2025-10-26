@@ -108,19 +108,19 @@ function handleRequest(e, method) {
 // AUTHENTICATION & AUTHORIZATION
 // ============================================
 
-function authenticateUser() {
-  // Simple password-based authentication for "Anyone" access
-  // In production, this should check against a secure password
+// function authenticateUser() {
+//   // Simple password-based authentication for "Anyone" access
+//   // In production, this should check against a secure password
 
-  return {
-    success: true,
-    user: {
-      email: "staff@ofcs.net",
-      role: "admin",
-      room: null,
-    },
-  };
-}
+//   return {
+//     success: true,
+//     user: {
+//       email: "staff@ofcs.net",
+//       role: "admin",
+//       room: null,
+//     },
+//   };
+// }
 
 function verifyStaffEmail(email) {
   try {
@@ -343,11 +343,11 @@ function handleCheckIn(params) {
     "M/d/yyyy"
   );
 
-  Logger.log("Archiving pass...");
-  Logger.log("Date: " + dateOnly);
-  Logger.log("CheckOut: " + checkOutTimeFormatted);
-  Logger.log("CheckIn: " + checkInTimeFormatted);
-  Logger.log("Duration: " + durationMinutes + " minutes");
+  // Logger.log("Archiving pass...");
+  // Logger.log("Date: " + dateOnly);
+  // Logger.log("CheckOut: " + checkOutTimeFormatted);
+  // Logger.log("CheckIn: " + checkInTimeFormatted);
+  // Logger.log("Duration: " + durationMinutes + " minutes");
 
   // Archive the pass - Column order matches Archive sheet
   // Date | PassID | StudentID | StudentName | RoomFrom | Destination | CustomDestination | CheckOutTime | Status | CheckInTime | DurationMinutes | CheckInBy
@@ -371,7 +371,7 @@ function handleCheckIn(params) {
   // Remove from active passes
   activeSheet.deleteRow(passRow);
 
-  Logger.log("Check-in complete");
+  //Logger.log("Check-in complete");
 
   return {
     success: true,
@@ -542,14 +542,14 @@ function getSystemSettings() {
     const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
 
-    console.log('Total config rows: ' + configData.length);
-    console.log('Row 1: ' + JSON.stringify(configData[0]));
-    console.log('Row 2: ' + JSON.stringify(configData[1]));
+    // console.log('Total config rows: ' + configData.length);
+    // console.log('Row 1: ' + JSON.stringify(configData[0]));
+    // console.log('Row 2: ' + JSON.stringify(configData[1]));
 
     const settings = {
-      checkoutEnabled: true,
-      maxCheckoutMinutes: 30,
-      dayEnd: "2:46 PM",
+      CHECKOUT_ENABLED: true,
+      MAX_CHECKOUT_MINUTES: 30,
+      DAY_END: "2:46 PM"
     };
 
     // Read settings from Config sheet
@@ -559,14 +559,14 @@ function getSystemSettings() {
         const settingValue = configData[i][2];
 
         if (settingName === "CHECKOUT_ENABLED") {
-          settings.checkoutEnabled =
+          settings.CHECKOUT_ENABLED =
             settingValue.toString().toUpperCase() === "TRUE";
         } else if (settingName === 'MAX_CHECKOUT_MINUTES') {
           console.log('Found MAX_CHECKOUT_MINUTES: ' + settingValue);
-          settings.maxCheckoutMinutes = parseInt(settingValue) || 30;
-          console.log('Parsed to: ' + settings.maxCheckoutMinutes);
+          settings.MAX_CHECKOUT_MINUTES = parseInt(settingValue) || 30;
+          console.log('Parsed to: ' + settings.MAX_CHECKOUT_MINUTES);
         } else if (settingName === "DAY_END") {
-          settings.dayEnd = settingValue.toString();
+          settings.DAY_END = settingValue.toString();
         }
       }
     }
@@ -581,9 +581,9 @@ function getSystemSettings() {
       success: false,
       error: error.toString(),
       settings: {
-        checkoutEnabled: true,
-        maxCheckoutMinutes: 30,
-        dayEnd: "2:46 PM",
+        CHECKOUT_ENABLED: true,
+        MAX_CHECKOUT_MINUTES: 30,
+        DAY_END: "2:46 PM",
       },
     };
   }
@@ -1121,29 +1121,6 @@ function getTodayPasses(params) {
   }
 }
 
-// ============================================
-// TESTING FUNCTIONS (Remove in production)
-// ============================================
-
-function testCheckOut() {
-  const result = handleCheckOut({
-    studentId: "123456",
-    destination: "restroom",
-    roomFrom: "101",
-    customDestination: null,
-  });
-  Logger.log(result);
-}
-
-function testGetActivePasses() {
-  const result = getActivePasses({});
-  Logger.log(result);
-}
-
-function testAnalytics() {
-  const result = getAnalytics(30);
-  Logger.log(result);
-}
 
 // ============================================
 // UPDATE ARCHIVED PASS
@@ -1345,9 +1322,9 @@ function testConfig() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const configSheet = ss.getSheetByName('Config');
   const data = configSheet.getDataRange().getValues();
-  
+
   Logger.log('Total rows: ' + data.length);
-  
+
   // Look for SETTING rows
   for (let i = 0; i < data.length; i++) {
     if (data[i][0] === 'SETTING') {
