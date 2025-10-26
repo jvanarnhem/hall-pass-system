@@ -237,17 +237,15 @@ const api = {
 };
 
 // ---- Instant UI snapshots + cache versions ----
-const DESTINATIONS_SNAPSHOT = [
-  "Restroom",
-  "Nurse",
-  "Guidance",
-  "Other",
-];
+const DESTINATIONS_SNAPSHOT = ["Restroom", "Nurse", "Guidance", "Other"];
 const DESTINATIONS_CACHE_VERSION = "v1"; // bump to invalidate client cache
 const STAFF_CACHE_VERSION = "v1"; // bump if the staff list format changes
 
 // Student Check-Out Component
 const StudentCheckOut = ({ roomNumber }) => {
+  const [systemSettings, setSystemSettings] = useState(null);
+  const [checkoutBlocked, setCheckoutBlocked] = useState(false);
+  const [blockReason, setBlockReason] = useState("");
   const [studentId, setStudentId] = useState("");
   const [destination, setDestination] = useState("");
   const [customDestination, setCustomDestination] = useState("");
@@ -257,6 +255,57 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [staffList, setStaffList] = useState([]);
   const [filteredStaff, setFilteredStaff] = useState([]);
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
+
+  const checkIfCheckoutAllowed = (settings) => {
+    const now = new Date();
+
+    // Check if manually disabled
+    if (!settings.CHECKOUT_ENABLED) {
+      setCheckoutBlocked(true);
+      setBlockReason(
+        "Hall passes are currently disabled. Please check with the office."
+      );
+      return false;
+    }
+
+    // Check if weekend
+    const dayOfWeek = now.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      setCheckoutBlocked(true);
+      setBlockReason("Hall passes are only available during school days.");
+      return false;
+    }
+
+    // Check if after day end time
+    const dayEndStr = settings.DAY_END || "2:46 PM";
+    const timeMatch = dayEndStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1]);
+      const minutes = parseInt(timeMatch[2]);
+      const isPM = timeMatch[3].toUpperCase() === "PM";
+
+      if (isPM && hours !== 12) hours += 12;
+      if (!isPM && hours === 12) hours = 0;
+
+      const dayEnd = new Date(now);
+      dayEnd.setHours(hours, minutes, 0, 0);
+
+      if (now >= dayEnd) {
+        setCheckoutBlocked(true);
+        setBlockReason(
+          "Hall passes are only available during school hours (until " +
+            dayEndStr +
+            ")."
+        );
+        return false;
+      }
+    }
+
+    setCheckoutBlocked(false);
+    setBlockReason("");
+    return true;
+  };
 
   // Load destinations & staff list with SWR cache (instant + background refresh)
   useEffect(() => {
@@ -293,6 +342,28 @@ const StudentCheckOut = ({ roomNumber }) => {
           setFilteredStaff(fresh);
         },
       });
+
+      // System settings
+      await swr({
+        key: "systemSettings",
+        version: 1,
+        ttlMs: 60 * 60 * 1000, // 1 hour
+        fetcher: async () => {
+          const res = await api.getSystemSettings();
+          return res?.success
+            ? res.settings
+            : {
+                CHECKOUT_ENABLED: true,
+                MAX_CHECKOUT_MINUTES: 46,
+                DAY_END: "2:46 PM",
+              };
+        },
+        onUpdate: (fresh) => {
+          if (!mounted) return;
+          setSystemSettings(fresh);
+          checkIfCheckoutAllowed(fresh);
+        },
+      });
     })().catch(() => {
       /* ignore */
     });
@@ -321,6 +392,18 @@ const StudentCheckOut = ({ roomNumber }) => {
   };
 
   const handleSubmit = async () => {
+    // Check if checkout is blocked
+    if (checkoutBlocked) {
+      setStatus({
+        type: "error",
+        message: blockReason,
+      });
+      return;
+    }
+
+    // Trigger auto check-in of expired passes
+    await api.autoCheckInExpiredPasses();
+
     if (studentId.length !== 6) {
       setStatus({ type: "error", message: "Student ID must be 6 digits" });
       return;
@@ -427,7 +510,14 @@ const StudentCheckOut = ({ roomNumber }) => {
           </h1>
           <p className="text-gray-600 text-sm">Room {roomNumber}</p>
         </div>
-
+        {checkoutBlocked && (
+          <div className="mb-4 p-4 bg-red-50 border-2 border-red-200 rounded-lg">
+            <div className="flex items-center gap-2 text-red-800">
+              <AlertCircle size={20} />
+              <p className="font-semibold text-sm">{blockReason}</p>
+            </div>
+          </div>
+        )}
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1115,6 +1205,7 @@ const Dashboard = ({ userRole, userRoom, userEmail }) => {
   const loadActivePasses = async () => {
     setLoading(true);
     try {
+      await api.autoCheckInExpiredPasses();
       const result = await api.getActivePasses({
         roomFrom: filterRoom,
         destination: filterDestination,
