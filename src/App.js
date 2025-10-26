@@ -65,7 +65,28 @@ const api = {
       return { success: false, error: error.message };
     }
   },
+  async getSystemSettings() {
+    try {
+      const params = new URLSearchParams({
+        action: "getSystemSettings",
+      });
 
+      const response = await fetch(`${API_BASE}?${params}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Get system settings error:", error);
+      return {
+        success: false,
+        error: error.message,
+        settings: {
+          CHECKOUT_ENABLED: true,
+          MAX_CHECKOUT_MINUTES: 30,
+          DAY_END: "2:46 PM",
+        },
+      };
+    }
+  },
   async getActivePasses(filters = {}) {
     try {
       const params = new URLSearchParams({
@@ -119,7 +140,20 @@ const api = {
       return { success: false, error: error.message };
     }
   },
+  async autoCheckInExpiredPasses() {
+    try {
+      const params = new URLSearchParams({
+        action: "autoCheckInExpiredPasses",
+      });
 
+      const response = await fetch(`${API_BASE}?${params}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Auto check-in error:", error);
+      return { success: false, error: error.message };
+    }
+  },
   async authenticate() {
     try {
       const params = new URLSearchParams({
@@ -257,6 +291,7 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
 
   const checkIfCheckoutAllowed = (settings) => {
+    console.log("Checking checkout allowed...", settings);
     const now = new Date();
 
     // Check if manually disabled
@@ -267,7 +302,7 @@ const StudentCheckOut = ({ roomNumber }) => {
       );
       return false;
     }
-
+    /*
     // Check if weekend
     const dayOfWeek = now.getDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) {
@@ -275,7 +310,7 @@ const StudentCheckOut = ({ roomNumber }) => {
       setBlockReason("Hall passes are only available during school days.");
       return false;
     }
-
+    */
     // Check if after day end time
     const dayEndStr = settings.DAY_END || "2:46 PM";
     const timeMatch = dayEndStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -346,19 +381,46 @@ const StudentCheckOut = ({ roomNumber }) => {
       // System settings
       await swr({
         key: "systemSettings",
-        version: 1,
-        ttlMs: 60 * 60 * 1000, // 1 hour
+        version: async () => {
+          try {
+            // Do a quick fetch to check version
+            const params = new URLSearchParams({
+              action: "getSystemSettings",
+              _check: "version",
+            });
+            const response = await fetch(`${API_BASE}?${params}`);
+            const data = await response.json();
+            return data?.settings?.SETTINGS_VERSION || 1;
+          } catch {
+            return 1;
+          }
+        },
+        ttlMs: 10 * 60 * 1000,
         fetcher: async () => {
-          const res = await api.getSystemSettings();
-          return res?.success
-            ? res.settings
-            : {
-                CHECKOUT_ENABLED: true,
-                MAX_CHECKOUT_MINUTES: 46,
-                DAY_END: "2:46 PM",
-              };
+          console.log("Fetching system settings...");
+          try {
+            const res = await api.getSystemSettings();
+            console.log("Settings response:", res);
+            console.log("Is success?", res?.success);
+            console.log("Settings data:", res?.settings);
+            return res?.success
+              ? res.settings
+              : {
+                  CHECKOUT_ENABLED: true,
+                  MAX_CHECKOUT_MINUTES: 46,
+                  DAY_END: "2:46 PM",
+                };
+          } catch (error) {
+            console.error("Error fetching settings:", error);
+            return {
+              CHECKOUT_ENABLED: true,
+              MAX_CHECKOUT_MINUTES: 46,
+              DAY_END: "2:46 PM",
+            };
+          }
         },
         onUpdate: (fresh) => {
+          console.log("Settings onUpdate called with:", fresh);
           if (!mounted) return;
           setSystemSettings(fresh);
           checkIfCheckoutAllowed(fresh);
@@ -401,9 +463,6 @@ const StudentCheckOut = ({ roomNumber }) => {
       return;
     }
 
-    // Trigger auto check-in of expired passes
-    await api.autoCheckInExpiredPasses();
-
     if (studentId.length !== 6) {
       setStatus({ type: "error", message: "Student ID must be 6 digits" });
       return;
@@ -423,6 +482,7 @@ const StudentCheckOut = ({ roomNumber }) => {
     setStatus(null);
 
     try {
+      // Quick student lookup first
       const studentCheck = await api.getStudentName(studentId);
 
       if (!studentCheck.success || !studentCheck.studentName) {
@@ -434,43 +494,61 @@ const StudentCheckOut = ({ roomNumber }) => {
         return;
       }
 
-      const result = await api.checkOut(
-        studentId,
-        destination,
-        roomNumber,
-        destination === "other" ? customDestination : null
-      );
+      // Show success immediately (optimistic UI)
+      const finalDestination =
+        destination === "other" ? customDestination : destination;
 
-      if (result.success) {
-        setStatus({
-          type: "success",
-          message: `${
-            studentCheck.studentName
-          } checked out successfully. Please proceed to ${
-            destination === "other" ? customDestination : destination
-          }.`,
-        });
+      setStatus({
+        type: "success",
+        message: `${studentCheck.studentName} checked out successfully. Please proceed to ${finalDestination}.`,
+      });
 
-        setTimeout(() => {
-          setStudentId("");
-          setDestination("");
-          setCustomDestination("");
-          setStatus(null);
-        }, 3000);
-      } else if (result.isDuplicate) {
-        setStatus({ type: "error", message: result.error });
-      } else {
-        setStatus({
-          type: "error",
-          message: result.error || "An error occurred. Please try again.",
-        });
-      }
+      // Clear form immediately for next student
+      const savedStudentId = studentId;
+      const savedDestination = destination;
+      const savedCustomDestination = customDestination;
+
+      setStudentId("");
+      setDestination("");
+      setCustomDestination("");
+      setLoading(false);
+
+      // Do the actual checkout in background
+      setTimeout(async () => {
+        try {
+          // Auto check-in expired passes
+          await api.autoCheckInExpiredPasses();
+
+          // Create the pass
+          const result = await api.checkOut(
+            savedStudentId,
+            savedDestination,
+            roomNumber,
+            savedDestination === "other" ? savedCustomDestination : null
+          );
+
+          // If it actually failed, show error (rare)
+          if (!result.success) {
+            setStatus({
+              type: "error",
+              message: result.error || "Checkout failed. Please try again.",
+            });
+          } else {
+            // Clear success message after 3 seconds
+            setTimeout(() => {
+              setStatus(null);
+            }, 3000);
+          }
+        } catch (error) {
+          console.error("Background checkout error:", error);
+          // Don't show error to user since they already saw success
+        }
+      }, 50);
     } catch (error) {
       setStatus({
         type: "error",
         message: "System error. Please contact your teacher.",
       });
-    } finally {
       setLoading(false);
     }
   };

@@ -5,6 +5,7 @@
 
 // Configuration - Update these with your Sheet ID
 const SPREADSHEET_ID = "1ihOKAMKoYFKD-_xbWFHIun46YN0KEO5Ox0oeMSmdmhU"; // Get from URL
+
 const SHEET_NAMES = {
   ROSTER: "StudentRoster",
   ACTIVE: "ActivePasses",
@@ -53,10 +54,10 @@ function handleRequest(e, method) {
       case "getAnalytics":
         result = getAnalytics(params.days || 30);
         break;
-      case "getSystemSettings":
+      case 'getSystemSettings':
         result = getSystemSettings();
         break;
-      case "autoCheckInExpiredPasses":
+      case 'autoCheckInExpiredPasses':
         result = autoCheckInExpiredPasses();
         break;
       case "getStaffDropdownList":
@@ -237,7 +238,6 @@ function handleCheckOut(params) {
       checkOutTime.getMinutes() / 60 +
       checkOutTime.getSeconds() / 3600) /
     24;
-
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
 
@@ -281,7 +281,6 @@ function handleCheckIn(params) {
   if (!passId) {
     return { success: false, error: "Pass ID is required" };
   }
-
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
   const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
@@ -537,10 +536,15 @@ function getAnalytics(days) {
 // ============================================
 
 function getSystemSettings() {
+  console.log("RUN");
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
+
+    console.log('Total config rows: ' + configData.length);
+    console.log('Row 1: ' + JSON.stringify(configData[0]));
+    console.log('Row 2: ' + JSON.stringify(configData[1]));
 
     const settings = {
       checkoutEnabled: true,
@@ -557,8 +561,10 @@ function getSystemSettings() {
         if (settingName === "CHECKOUT_ENABLED") {
           settings.checkoutEnabled =
             settingValue.toString().toUpperCase() === "TRUE";
-        } else if (settingName === "MAX_CHECKOUT_MINUTES") {
+        } else if (settingName === 'MAX_CHECKOUT_MINUTES') {
+          console.log('Found MAX_CHECKOUT_MINUTES: ' + settingValue);
           settings.maxCheckoutMinutes = parseInt(settingValue) || 30;
+          console.log('Parsed to: ' + settings.maxCheckoutMinutes);
         } else if (settingName === "DAY_END") {
           settings.dayEnd = settingValue.toString();
         }
@@ -596,9 +602,8 @@ function autoCheckInExpiredPasses() {
         error: "Failed to load settings",
       };
     }
-
-    const maxMinutes = settings.settings.maxCheckoutMinutes;
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const maxMinutes = settings.settings.MAX_CHECKOUT_MINUTES;
     const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
     const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
 
@@ -626,6 +631,9 @@ function autoCheckInExpiredPasses() {
       );
 
       const minutesOut = Math.floor((now - checkOutTime) / 60000);
+
+      Logger.log('Pass ' + row[1] + ': ' + minutesOut + ' minutes (max: ' + maxMinutes + ')');
+
 
       // If over max time, auto check-in
       if (minutesOut >= maxMinutes) {
@@ -782,9 +790,9 @@ function getDestinationList() {
 
     Logger.log(
       "Found " +
-        destinations.length +
-        " destinations: " +
-        destinations.join(", ")
+      destinations.length +
+      " destinations: " +
+      destinations.join(", ")
     );
 
     return {
@@ -845,8 +853,8 @@ function importRosterCSV(csvData) {
     // Check if first row is a header (contains "ID" or "Name")
     const startRow =
       rows[0][0].toLowerCase().includes("id") ||
-      rows[0][0].toLowerCase().includes("student") ||
-      rows[0][1].toLowerCase().includes("name")
+        rows[0][0].toLowerCase().includes("student") ||
+        rows[0][1].toLowerCase().includes("name")
         ? 1
         : 0;
 
@@ -1190,10 +1198,10 @@ function updateArchivedPass(params) {
   );
   const checkInTimeFormatted = newCheckInTime
     ? Utilities.formatDate(
-        newCheckInTime,
-        Session.getScriptTimeZone(),
-        "h:mm:ss a"
-      )
+      newCheckInTime,
+      Session.getScriptTimeZone(),
+      "h:mm:ss a"
+    )
     : "";
   const dateOnly = Utilities.formatDate(
     newCheckOutTime,
@@ -1305,9 +1313,9 @@ function refreshStaffDropdownCache() {
     ui.alert(
       "Cache Refreshed",
       "Staff dropdown list updated successfully!\n\n" +
-        "Found " +
-        result.count +
-        " staff members.",
+      "Found " +
+      result.count +
+      " staff members.",
       ui.ButtonSet.OK
     );
 
@@ -1331,4 +1339,24 @@ function refreshStaffDropdownCache() {
       error: error.toString(),
     };
   }
+}
+
+function testConfig() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  
+  Logger.log('Total rows: ' + data.length);
+  
+  // Look for SETTING rows
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] === 'SETTING') {
+      Logger.log('Row ' + i + ': ' + JSON.stringify(data[i]));
+    }
+  }
+}
+
+function testGetSettings() {
+  const result = getSystemSettings();
+  Logger.log(JSON.stringify(result));
 }

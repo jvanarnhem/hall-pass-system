@@ -7,8 +7,7 @@
  * with the correct structure and initial data
  */
 function initialSetup() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   Logger.log('Checking if setup has already been run...');
 
   // Check if sheets already exist
@@ -117,25 +116,25 @@ function createActivePassesSheet(ss) {
 
 function createArchiveSheet(ss) {
   let sheet = ss.getSheetByName('Archive');
-  
+
   if (sheet) {
     ss.deleteSheet(sheet);
   }
-  
+
   sheet = ss.insertSheet('Archive');
-  
+
   const headers = [
-    ['Date', 'PassID', 'StudentID', 'StudentName', 'RoomFrom', 'Destination', 'CustomDestination', 
-     'CheckOutTime', 'Status', 'CheckInTime', 'DurationMinutes', 'CheckInBy']
+    ['Date', 'PassID', 'StudentID', 'StudentName', 'RoomFrom', 'Destination', 'CustomDestination',
+      'CheckOutTime', 'Status', 'CheckInTime', 'DurationMinutes', 'CheckInBy']
   ];
-  
+
   sheet.getRange(1, 1, 1, 12).setValues(headers);
-  
+
   sheet.getRange(1, 1, 1, 12)
     .setBackground('#fbbc04')
     .setFontColor('#ffffff')
     .setFontWeight('bold');
-  
+
   // Set column widths
   sheet.setColumnWidth(1, 100);  // Date
   sheet.setColumnWidth(2, 150);  // PassID
@@ -149,9 +148,9 @@ function createArchiveSheet(ss) {
   sheet.setColumnWidth(10, 120); // CheckInTime
   sheet.setColumnWidth(11, 120); // DurationMinutes
   sheet.setColumnWidth(12, 200); // CheckInBy
-  
+
   sheet.setFrozenRows(1);
-  
+
   Logger.log('Created Archive sheet');
 }
 
@@ -214,41 +213,41 @@ function createConfigSheet(ss) {
 
 function createStudentRosterSheet(ss) {
   let sheet = ss.getSheetByName('StudentRoster');
-  
+
   if (sheet) {
     ss.deleteSheet(sheet);
   }
-  
+
   sheet = ss.insertSheet('StudentRoster');
-  
+
   const headers = [
     ['StudentID', 'StudentName', 'Grade', 'Active', 'Email (Optional)']
   ];
-  
+
   sheet.getRange(1, 1, 1, 5).setValues(headers);
-  
+
   sheet.getRange(1, 1, 1, 5)
     .setBackground('#4285f4')
     .setFontColor('#ffffff')
     .setFontWeight('bold');
-  
+
   // Set column widths
   sheet.setColumnWidth(1, 100);  // StudentID
   sheet.setColumnWidth(2, 200);  // StudentName
   sheet.setColumnWidth(3, 80);   // Grade
   sheet.setColumnWidth(4, 80);   // Active
   sheet.setColumnWidth(5, 200);  // Email
-  
+
   sheet.setFrozenRows(1);
-  
+
   // Add sample data
   const sampleData = [
     ['123456', 'Sample Student', '9', 'TRUE', 'student@ofcs.net'],
     ['234567', 'Another Student', '10', 'TRUE', ''],
   ];
-  
+
   sheet.getRange(2, 1, sampleData.length, 5).setValues(sampleData);
-  
+
   Logger.log('Created StudentRoster sheet');
 }
 
@@ -269,7 +268,10 @@ function onOpen() {
     .addItem('📊 Generate Analytics Report', 'generateAnalyticsReport')
     .addSeparator()
     .addItem('📧 Email Room Links', 'showEmailLinksDialog')
-    .addItem('🔄 Refresh Staff Dropdown Cache', 'refreshStaffDropdownCache')  // ← ADD THIS
+    .addItem('🔄 Refresh Staff Dropdown Cache', 'refreshStaffDropdownCache')
+    .addSeparator()
+    .addItem('✅ Enable Checkouts', 'enableCheckouts')
+    .addItem('⛔ Disable Checkouts', 'disableCheckouts')
     .addSeparator()
     .addItem('💾 Create Backup', 'createBackup')
     .addItem('🔍 System Health Check', 'showHealthCheck')
@@ -460,11 +462,11 @@ function showExportDialog() {
 }
 
 function exportToNewSheet(dateRange) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const dates = dateRange ? dateRange.split(' to ') : [null, null];
   const data = exportArchiveData(dates[0], dates[1]);
 
   if (data.success) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const newSheet = ss.insertSheet('Export_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HHmmss'));
 
     newSheet.getRange(1, 1, data.data.length, data.data[0].length).setValues(data.data);
@@ -547,8 +549,7 @@ function showDeploymentInstructions() {
  * Quick test to verify setup
  */
 function testSetup() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const requiredSheets = ['StudentRoster', 'ActivePasses', 'Archive', 'Config'];
   let allPresent = true;
 
@@ -572,6 +573,7 @@ function testSetup() {
  * Clear all active passes (use cautiously!)
  */
 function clearActivePasses() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
     'Clear Active Passes',
@@ -580,7 +582,6 @@ function clearActivePasses() {
   );
 
   if (response == ui.Button.YES) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName('ActivePasses');
     const lastRow = sheet.getLastRow();
 
@@ -598,8 +599,9 @@ function clearActivePasses() {
  * Keeps StudentRoster and Config intact
  */
 function resetPassSheets() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const ui = SpreadsheetApp.getUi();
-  
+
   // Confirm with user
   const response = ui.alert(
     '⚠️ Reset Pass Sheets',
@@ -610,15 +612,13 @@ function resetPassSheets() {
     'Are you sure you want to continue?',
     ui.ButtonSet.YES_NO
   );
-  
+
   if (response !== ui.Button.YES) {
     ui.alert('Cancelled', 'No changes were made.', ui.ButtonSet.OK);
     return;
   }
-  
+
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    
     // Delete and recreate ActivePasses
     Logger.log('Resetting ActivePasses...');
     const activeSheet = ss.getSheetByName('ActivePasses');
@@ -626,7 +626,7 @@ function resetPassSheets() {
       ss.deleteSheet(activeSheet);
     }
     createActivePassesSheet(ss);
-    
+
     // Delete and recreate Archive
     Logger.log('Resetting Archive...');
     const archiveSheet = ss.getSheetByName('Archive');
@@ -634,9 +634,9 @@ function resetPassSheets() {
       ss.deleteSheet(archiveSheet);
     }
     createArchiveSheet(ss);
-    
+
     Logger.log('Reset complete');
-    
+
     ui.alert(
       '✅ Reset Complete',
       'ActivePasses and Archive sheets have been reset with new headers.\n\n' +
@@ -644,7 +644,7 @@ function resetPassSheets() {
       'The system is ready to use!',
       ui.ButtonSet.OK
     );
-    
+
   } catch (error) {
     Logger.log('Error resetting sheets: ' + error.toString());
     ui.alert('Error', 'Failed to reset sheets: ' + error.toString(), ui.ButtonSet.OK);
@@ -655,10 +655,10 @@ function debugActivePasses() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
   const data = activeSheet.getDataRange().getValues();
-  
+
   Logger.log('=== DEBUGGING ACTIVE PASSES ===');
   Logger.log('Total rows: ' + data.length);
-  
+
   if (data.length > 1) {
     Logger.log('\nRow 2 data:');
     for (let j = 0; j < data[1].length; j++) {
@@ -671,20 +671,86 @@ function debugRoomFormats() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
   const configData = configSheet.getDataRange().getValues();
-  
+
   Logger.log('=== STAFF ROOMS ===');
   for (let i = 1; i < configData.length; i++) {
     if (configData[i][0] === 'STAFF') {
       Logger.log('Email: ' + configData[i][1] + ' | Room: "' + configData[i][3] + '" (type: ' + typeof configData[i][3] + ')');
     }
   }
-  
+
   // Also check an active pass
   const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
   const activeData = activeSheet.getDataRange().getValues();
-  
+
   Logger.log('\n=== ACTIVE PASS ROOMS ===');
   for (let i = 1; i < activeData.length; i++) {
     Logger.log('Pass ' + activeData[i][1] + ' | Room: "' + activeData[i][4] + '" (type: ' + typeof activeData[i][4] + ')');
+  }
+}
+
+// ============================================
+// ENABLE/DISABLE CHECKOUTS
+// ============================================
+
+function enableCheckouts() {
+  updateCheckoutSetting(true);
+}
+
+function disableCheckouts() {
+  updateCheckoutSetting(false);
+}
+
+function updateCheckoutSetting(enabled) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);  // ← ADD THIS
+    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configData = configSheet.getDataRange().getValues();
+    
+    // Find CHECKOUT_ENABLED setting
+    let found = false;
+    for (let i = 1; i < configData.length; i++) {
+      if (configData[i][0] === 'SETTING' && configData[i][1] === 'CHECKOUT_ENABLED') {
+        configSheet.getRange(i + 1, 3).setValue(enabled ? 'TRUE' : 'FALSE');
+        found = true;
+        break;
+      }
+    }
+    
+    // If not found, add it
+    if (!found) {
+      configSheet.appendRow(['SETTING', 'CHECKOUT_ENABLED', enabled ? 'TRUE' : 'FALSE', '', '']);
+    }
+    
+    // Increment settings version to bust cache
+    let versionFound = false;
+    for (let i = 1; i < configData.length; i++) {
+      if (configData[i][0] === 'SETTING' && configData[i][1] === 'SETTINGS_VERSION') {
+        const currentVersion = parseInt(configData[i][2]) || 0;
+        configSheet.getRange(i + 1, 3).setValue(currentVersion + 1);
+        Logger.log('Incremented SETTINGS_VERSION to ' + (currentVersion + 1));
+        versionFound = true;
+        break;
+      }
+    }
+    
+    // If SETTINGS_VERSION doesn't exist, create it
+    if (!versionFound) {
+      configSheet.appendRow(['SETTING', 'SETTINGS_VERSION', '1', '', '']);
+      Logger.log('Created SETTINGS_VERSION = 1');
+    }
+    
+    const ui = SpreadsheetApp.getUi();
+    ui.alert(
+      enabled ? 'Checkouts Enabled' : 'Checkouts Disabled',
+      enabled 
+        ? '✅ Students can now check out.' 
+        : '⛔ Checkouts are now disabled.\n\nStudents will see a message that hall passes are not available.',
+      ui.ButtonSet.OK
+    );
+    
+  } catch (error) {
+    Logger.log('Error updating checkout setting: ' + error.toString());
+    SpreadsheetApp.getUi().alert('Error', 'Failed to update setting: ' + error.toString(), SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
