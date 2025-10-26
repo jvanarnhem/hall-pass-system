@@ -10,6 +10,8 @@ import {
   CheckCircle,
   RefreshCw,
 } from "lucide-react";
+// local SWR cache helper you created at src/lib/swrCache.js
+import { swr } from "./lib/swrCache";
 
 // Add Google Client ID here
 const GOOGLE_CLIENT_ID =
@@ -234,6 +236,16 @@ const api = {
   },
 };
 
+// ---- Instant UI snapshots + cache versions ----
+const DESTINATIONS_SNAPSHOT = [
+  "Restroom",
+  "Nurse",
+  "Guidance",
+  "Other",
+];
+const DESTINATIONS_CACHE_VERSION = "v1"; // bump to invalidate client cache
+const STAFF_CACHE_VERSION = "v1"; // bump if the staff list format changes
+
 // Student Check-Out Component
 const StudentCheckOut = ({ roomNumber }) => {
   const [studentId, setStudentId] = useState("");
@@ -241,43 +253,53 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [customDestination, setCustomDestination] = useState("");
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [destinations, setDestinations] = useState([]); // Add this
+  const [destinations, setDestinations] = useState(DESTINATIONS_SNAPSHOT);
   const [staffList, setStaffList] = useState([]);
   const [filteredStaff, setFilteredStaff] = useState([]);
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
 
-  // Load destinations on mount
+  // Load destinations & staff list with SWR cache (instant + background refresh)
   useEffect(() => {
-    loadDestinations();
+    let mounted = true;
+    (async () => {
+      // Destinations
+      await swr({
+        key: "destinations",
+        version: DESTINATIONS_CACHE_VERSION,
+        ttlMs: 6 * 60 * 60 * 1000, // 6 hours
+        fetcher: async () => {
+          const res = await api.getDestinationList();
+          // keep shape as array of strings, matching your UI expectations
+          return res?.success ? res.destinations || [] : DESTINATIONS_SNAPSHOT;
+        },
+        onUpdate: (fresh) => {
+          if (!mounted) return;
+          setDestinations(fresh?.length ? fresh : DESTINATIONS_SNAPSHOT);
+        },
+      });
+
+      // Staff list (used only when user chooses "other")
+      await swr({
+        key: "staffList",
+        version: STAFF_CACHE_VERSION,
+        ttlMs: 24 * 60 * 60 * 1000, // 24 hours
+        fetcher: async () => {
+          const res = await api.getStaffDropdownList();
+          return res?.success ? res.staffList || [] : [];
+        },
+        onUpdate: (fresh) => {
+          if (!mounted) return;
+          setStaffList(fresh);
+          setFilteredStaff(fresh);
+        },
+      });
+    })().catch(() => {
+      /* ignore */
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
-
-  const loadDestinations = async () => {
-    try {
-      const result = await api.getDestinationList();
-      if (result.success) {
-        setDestinations(result.destinations || []);
-      }
-
-      // Also load staff list
-      const staffResult = await api.getStaffDropdownList();
-      if (staffResult.success) {
-        setStaffList(staffResult.staffList || []);
-        setFilteredStaff(staffResult.staffList || []);
-      }
-    } catch (error) {
-      console.error("Error loading destinations:", error);
-      // Fallback to defaults if load fails
-      setDestinations([
-        "Restroom",
-        "Office",
-        "Guidance",
-        "Nurse",
-        "Administrator",
-        "Teacher",
-        "Other",
-      ]);
-    }
-  };
 
   const handleStaffSearch = (searchText) => {
     setCustomDestination(searchText);
