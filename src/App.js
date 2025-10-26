@@ -13,15 +13,15 @@ import {
 // local SWR cache helper you created at src/lib/swrCache.js
 import { swr } from "./lib/swrCache";
 
-// Add Google Client ID here
-const GOOGLE_CLIENT_ID =
-  "128297272141-pgk7p2pjj1joe9kdi19odeldlv8f26as.apps.googleusercontent.com";
-// ====================
-// API CONFIGURATION
-// ====================
-// IMPORTANT: Replace YOUR_DEPLOYMENT_ID with your actual Google Apps Script deployment ID
-const API_BASE =
-  "https://script.google.com/a/macros/ofcs.net/s/AKfycbzX57vRTaPDzlTEAtnvcZ0ujD9lCv_lenwGEZeErxeMsh130Ze0wbNt0_2nqTjOcxs1/exec";
+const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+const API_BASE = process.env.REACT_APP_API_BASE;
+
+// Validate environment variables in development
+if (!GOOGLE_CLIENT_ID || !API_BASE) {
+  console.error(
+    "Missing required environment variables. Please check your .env file."
+  );
+}
 
 // API Service
 const api = {
@@ -110,13 +110,8 @@ const api = {
         studentId,
       });
 
-      //console.log("Calling API:", `${API_BASE}?${params}`);
-
       const response = await fetch(`${API_BASE}?${params}`);
-      //console.log("Response status:", response.status);
-
       const data = await response.json();
-      //console.log("Response data:", data);
 
       return data;
     } catch (error) {
@@ -291,7 +286,6 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
 
   const checkIfCheckoutAllowed = (settings) => {
-    console.log("Checking checkout allowed...", settings);
     const now = new Date();
 
     // Check if manually disabled
@@ -397,12 +391,8 @@ const StudentCheckOut = ({ roomNumber }) => {
         },
         ttlMs: 10 * 60 * 1000,
         fetcher: async () => {
-          console.log("Fetching system settings...");
           try {
             const res = await api.getSystemSettings();
-            console.log("Settings response:", res);
-            console.log("Is success?", res?.success);
-            console.log("Settings data:", res?.settings);
             return res?.success
               ? res.settings
               : {
@@ -420,7 +410,6 @@ const StudentCheckOut = ({ roomNumber }) => {
           }
         },
         onUpdate: (fresh) => {
-          console.log("Settings onUpdate called with:", fresh);
           if (!mounted) return;
           setSystemSettings(fresh);
           checkIfCheckoutAllowed(fresh);
@@ -1302,14 +1291,10 @@ const Dashboard = ({ userRole, userRoom, userEmail }) => {
   };
   const loadRooms = async () => {
     try {
-      //console.log('Loading rooms...');
       const result = await api.getRoomList();
-      //console.log('getRoomList result:', result);
 
       if (result.success) {
-        //console.log('Rooms received:', result.rooms);
         setRooms(result.rooms || []);
-        //console.log('Rooms state updated');
       } else {
         console.log("getRoomList failed:", result.error);
       }
@@ -1329,25 +1314,17 @@ const Dashboard = ({ userRole, userRoom, userEmail }) => {
   };
 
   const handleCheckIn = async (passId, studentName) => {
-    //console.log("Attempting to check in pass:", passId);
-
     // Optimistic update - remove from list immediately
     setActivePasses((prev) => prev.filter((p) => p.id !== passId));
 
     try {
-      const result = await api.checkIn(passId);
-      //console.log("Check-in result:", result);
-
-      // Show success message
-      //alert(`${studentName} checked in successfully!`);
-
-      // Reload to confirm
-      await loadActivePasses();
-      //console.log("Reloaded active passes");
+      await api.checkIn(passId);
+      // Don't reload - trust the optimistic update
+      // The 10-second interval will confirm it's gone
     } catch (error) {
       console.error("Error checking in:", error);
       alert("Error checking in student. Please try again.");
-      // Reload to restore if failed
+      // Only reload on error to restore the pass
       await loadActivePasses();
     }
   };
@@ -1959,41 +1936,30 @@ const App = () => {
 
   const handleGoogleResponse = async (response) => {
     try {
-      //console.log('1. Starting handleGoogleResponse');
-
       const userInfo = parseJwt(response.credential);
-      //console.log("2. User info:", userInfo);
-      //console.log("3. User email:", userInfo.email);
 
       if (!userInfo.email.endsWith("@ofcs.net")) {
-        console.log("4. Email not @ofcs.net");
         setAuthError("Only @ofcs.net accounts are allowed");
         return;
       }
 
-      //console.log("5. Verifying email with backend...");
       const authResult = await api.verifyStaffEmail(userInfo.email);
-      //console.log("6. Auth result:", authResult);
 
       if (authResult.success) {
-        //console.log('7. Auth successful, setting user');
         setUser({
           email: userInfo.email,
           name: userInfo.name,
           role: authResult.role,
           room: authResult.room,
         });
-        //console.log('8. Switching to dashboard mode');
         setMode("dashboard");
         setAuthError("");
       } else {
-        //console.log("9. Authorization failed:", authResult.error);
         setAuthError(
           "Your email is not authorized. Please contact the administrator."
         );
       }
     } catch (error) {
-      //console.error("10. CAUGHT ERROR:", error);
       console.error("Error stack:", error.stack);
       setAuthError("Authentication failed. Please try again.");
     }
