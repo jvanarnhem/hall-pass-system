@@ -108,44 +108,34 @@ function handleRequest(e, method) {
 // AUTHENTICATION & AUTHORIZATION
 // ============================================
 
-// function authenticateUser() {
-//   // Simple password-based authentication for "Anyone" access
-//   // In production, this should check against a secure password
+function getStaffConfig(email) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+  const configData = configSheet.getDataRange().getValues();
 
-//   return {
-//     success: true,
-//     user: {
-//       email: "staff@ofcs.net",
-//       role: "admin",
-//       room: null,
-//     },
-//   };
-// }
+  for (let i = 1; i < configData.length; i++) {
+    if (configData[i][0] === "STAFF" && configData[i][1] === email) {
+      return {
+        success: true,
+        role: configData[i][2],
+        room: configData[i][3] || null
+      };
+    }
+  }
+  
+  return { success: false, error: "Email not authorized" };
+}
 
 function verifyStaffEmail(email) {
   try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
-    const configData = configSheet.getDataRange().getValues();
-
     Logger.log("Verifying email: " + email);
-
-    // Look for user in authorization list
-    for (let i = 1; i < configData.length; i++) {
-      if (configData[i][0] === "STAFF" && configData[i][1] === email) {
-        return {
-          success: true,
-          role: configData[i][2],
-          room: configData[i][3] || null,
-        };
-      }
+    const result = getStaffConfig(email);
+    
+    if (!result.success) {
+      Logger.log("Email not found in Config");
     }
-
-    Logger.log("Email not found in Config");
-    return {
-      success: false,
-      error: "Email not authorized",
-    };
+    
+    return result;
   } catch (error) {
     Logger.log("Error verifying email: " + error.toString());
     return {
@@ -156,30 +146,8 @@ function verifyStaffEmail(email) {
 }
 
 function getUserRole(email) {
-  // Check if user is authorized
-  // This should be configured in your Config sheet
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
-  const configData = configSheet.getDataRange().getValues();
-
-  // Look for user in authorization list
-  for (let i = 1; i < configData.length; i++) {
-    if (configData[i][0] === "STAFF" && configData[i][1] === email) {
-      return {
-        role: configData[i][2], // 'admin' or 'teacher'
-        room: configData[i][3] || null,
-      };
-    }
-  }
-
-  return null;
-}
-
-function checkPermission(email, roomFrom) {
-  const userRole = getUserRole(email);
-  if (!userRole) return false;
-  if (userRole.role === "admin") return true;
-  return userRole.room === roomFrom;
+  const config = getStaffConfig(email);
+  return config.success ? { role: config.role, room: config.room } : null;
 }
 
 // ============================================
@@ -536,15 +504,10 @@ function getAnalytics(days) {
 // ============================================
 
 function getSystemSettings() {
-  console.log("RUN");
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
-
-    // console.log('Total config rows: ' + configData.length);
-    // console.log('Row 1: ' + JSON.stringify(configData[0]));
-    // console.log('Row 2: ' + JSON.stringify(configData[1]));
 
     const settings = {
       CHECKOUT_ENABLED: true,
@@ -562,9 +525,9 @@ function getSystemSettings() {
           settings.CHECKOUT_ENABLED =
             settingValue.toString().toUpperCase() === "TRUE";
         } else if (settingName === 'MAX_CHECKOUT_MINUTES') {
-          console.log('Found MAX_CHECKOUT_MINUTES: ' + settingValue);
+          Logger.log('Found MAX_CHECKOUT_MINUTES: ' + settingValue);
           settings.MAX_CHECKOUT_MINUTES = parseInt(settingValue) || 30;
-          console.log('Parsed to: ' + settings.MAX_CHECKOUT_MINUTES);
+          Logger.log('Parsed to: ' + settings.MAX_CHECKOUT_MINUTES);
         } else if (settingName === "DAY_END") {
           settings.DAY_END = settingValue.toString();
         }
@@ -1316,24 +1279,4 @@ function refreshStaffDropdownCache() {
       error: error.toString(),
     };
   }
-}
-
-function testConfig() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const configSheet = ss.getSheetByName('Config');
-  const data = configSheet.getDataRange().getValues();
-
-  Logger.log('Total rows: ' + data.length);
-
-  // Look for SETTING rows
-  for (let i = 0; i < data.length; i++) {
-    if (data[i][0] === 'SETTING') {
-      Logger.log('Row ' + i + ': ' + JSON.stringify(data[i]));
-    }
-  }
-}
-
-function testGetSettings() {
-  const result = getSystemSettings();
-  Logger.log(JSON.stringify(result));
 }
