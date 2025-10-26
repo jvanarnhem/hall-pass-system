@@ -53,6 +53,12 @@ function handleRequest(e, method) {
       case "getAnalytics":
         result = getAnalytics(params.days || 30);
         break;
+      case "getSystemSettings":
+        result = getSystemSettings();
+        break;
+      case "autoCheckInExpiredPasses":
+        result = autoCheckInExpiredPasses();
+        break;
       case "getStaffDropdownList":
         result = getStaffDropdownList();
         break;
@@ -524,6 +530,164 @@ function getAnalytics(days) {
       end: now.toISOString(),
     },
   };
+}
+
+// ============================================
+// GET SYSTEM SETTINGS
+// ============================================
+
+function getSystemSettings() {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
+    const configData = configSheet.getDataRange().getValues();
+
+    const settings = {
+      checkoutEnabled: true,
+      maxCheckoutMinutes: 30,
+      dayEnd: "2:46 PM",
+    };
+
+    // Read settings from Config sheet
+    for (let i = 1; i < configData.length; i++) {
+      if (configData[i][0] === "SETTING") {
+        const settingName = configData[i][1];
+        const settingValue = configData[i][2];
+
+        if (settingName === "CHECKOUT_ENABLED") {
+          settings.checkoutEnabled =
+            settingValue.toString().toUpperCase() === "TRUE";
+        } else if (settingName === "MAX_CHECKOUT_MINUTES") {
+          settings.maxCheckoutMinutes = parseInt(settingValue) || 30;
+        } else if (settingName === "DAY_END") {
+          settings.dayEnd = settingValue.toString();
+        }
+      }
+    }
+
+    return {
+      success: true,
+      settings: settings,
+    };
+  } catch (error) {
+    Logger.log("Error getting system settings: " + error.toString());
+    return {
+      success: false,
+      error: error.toString(),
+      settings: {
+        checkoutEnabled: true,
+        maxCheckoutMinutes: 30,
+        dayEnd: "2:46 PM",
+      },
+    };
+  }
+}
+
+// ============================================
+// AUTO CHECK-IN EXPIRED PASSES
+// ============================================
+
+function autoCheckInExpiredPasses() {
+  try {
+    const settings = getSystemSettings();
+    if (!settings.success) {
+      return {
+        success: false,
+        error: "Failed to load settings",
+      };
+    }
+
+    const maxMinutes = settings.settings.maxCheckoutMinutes;
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
+    const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
+
+    const activeData = activeSheet.getDataRange().getValues();
+    const now = new Date();
+    let checkedInCount = 0;
+
+    // Process from bottom to top (so row numbers don't shift)
+    for (let i = activeData.length - 1; i >= 1; i--) {
+      const row = activeData[i];
+
+      if (!row[1]) continue; // Skip if no PassID
+
+      // Combine Date (column A) and Time (column H)
+      const dateObj = row[0];
+      const timeObj = row[7];
+
+      const checkOutTime = new Date(
+        dateObj.getFullYear(),
+        dateObj.getMonth(),
+        dateObj.getDate(),
+        timeObj.getHours(),
+        timeObj.getMinutes(),
+        timeObj.getSeconds()
+      );
+
+      const minutesOut = Math.floor((now - checkOutTime) / 60000);
+
+      // If over max time, auto check-in
+      if (minutesOut >= maxMinutes) {
+        Logger.log(
+          "Auto checking in pass: " + row[1] + " (" + minutesOut + " minutes)"
+        );
+
+        const checkInTime = now;
+        const durationMinutes = maxMinutes; // Cap at max minutes
+
+        const checkOutTimeFormatted = Utilities.formatDate(
+          checkOutTime,
+          Session.getScriptTimeZone(),
+          "h:mm:ss a"
+        );
+        const checkInTimeFormatted = Utilities.formatDate(
+          checkInTime,
+          Session.getScriptTimeZone(),
+          "h:mm:ss a"
+        );
+        const dateOnly = Utilities.formatDate(
+          checkInTime,
+          Session.getScriptTimeZone(),
+          "M/d/yyyy"
+        );
+
+        // Archive with auto check-in note
+        archiveSheet.appendRow([
+          dateOnly, // Date
+          row[1], // PassID
+          row[2], // StudentID
+          row[3], // StudentName
+          row[4], // RoomFrom
+          row[5], // Destination
+          row[6], // CustomDestination
+          checkOutTimeFormatted, // CheckOutTime
+          "IN", // Status
+          checkInTimeFormatted, // CheckInTime
+          durationMinutes, // DurationMinutes (capped)
+          "auto", // CheckInBy
+        ]);
+
+        // Remove from active passes
+        activeSheet.deleteRow(i + 1);
+        checkedInCount++;
+      }
+    }
+
+    Logger.log("Auto checked in " + checkedInCount + " passes");
+
+    return {
+      success: true,
+      checkedInCount: checkedInCount,
+      maxMinutes: maxMinutes,
+    };
+  } catch (error) {
+    Logger.log("Error in autoCheckInExpiredPasses: " + error.toString());
+    return {
+      success: false,
+      error: error.toString(),
+    };
+  }
 }
 
 // ============================================
