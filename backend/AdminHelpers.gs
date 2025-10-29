@@ -11,7 +11,7 @@ function showAdminInterface() {
     .setTitle('Hall Pass Admin Panel')
     .setWidth(1200)
     .setHeight(800);
-  
+
   SpreadsheetApp.getUi().showModalDialog(html, 'Hall Pass System - Admin Panel');
 }
 
@@ -21,41 +21,52 @@ function showAdminInterface() {
 
 function getDashboardStats() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  
+
   // Total students
   const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
   const rosterData = rosterSheet.getDataRange().getValues();
   const totalStudents = rosterData.length - 1; // Exclude header
-  
+
   // Active passes
   const activeSheet = ss.getSheetByName(SHEET_NAMES.ACTIVE);
   const activeData = activeSheet.getDataRange().getValues();
   const activePasses = activeData.length - 1;
-  
+
   // Today's passes (from archive)
   const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
   const archiveData = archiveSheet.getDataRange().getValues();
-  
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
+
   let todayPasses = 0;
   let monthPasses = 0;
-  
+
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  
+
   for (let i = 1; i < archiveData.length; i++) {
-    const passDate = new Date(archiveData[i][6]); // CheckOutTime column
-    
+    // Combine Date (column A, index 0) and Time (column H, index 7)
+    const dateObj = archiveData[i][0];
+    const timeObj = archiveData[i][7];
+
+    const passDate = new Date(
+      dateObj.getFullYear(),
+      dateObj.getMonth(),
+      dateObj.getDate(),
+      timeObj.getHours(),
+      timeObj.getMinutes(),
+      timeObj.getSeconds()
+    );
+
     if (passDate >= today) {
       todayPasses++;
     }
-    
+
     if (passDate >= monthStart) {
       monthPasses++;
     }
   }
-  
+
   return {
     totalStudents: totalStudents,
     activePasses: activePasses,
@@ -73,7 +84,7 @@ function addNewStudent(studentId, studentName, grade) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
-    
+
     // Check if student ID already exists
     const data = rosterSheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
@@ -84,15 +95,15 @@ function addNewStudent(studentId, studentName, grade) {
         };
       }
     }
-    
+
     // Add new student
     rosterSheet.appendRow([studentId, studentName, grade, 'TRUE', '']);
-    
+
     return {
       success: true,
       message: `Added ${studentName} (${studentId}) successfully`
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -105,7 +116,7 @@ function getRosterData() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
   const data = rosterSheet.getDataRange().getValues();
-  
+
   const roster = [];
   for (let i = 1; i < data.length; i++) {
     roster.push({
@@ -116,7 +127,7 @@ function getRosterData() {
       email: data[i][4] || ''
     });
   }
-  
+
   return {
     success: true,
     roster: roster,
@@ -129,26 +140,26 @@ function updateStudent(studentId, updates) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
     const data = rosterSheet.getDataRange().getValues();
-    
+
     for (let i = 1; i < data.length; i++) {
       if (data[i][0].toString() === studentId.toString()) {
         if (updates.studentName) rosterSheet.getRange(i + 1, 2).setValue(updates.studentName);
         if (updates.grade) rosterSheet.getRange(i + 1, 3).setValue(updates.grade);
         if (updates.active !== undefined) rosterSheet.getRange(i + 1, 4).setValue(updates.active);
         if (updates.email) rosterSheet.getRange(i + 1, 5).setValue(updates.email);
-        
+
         return {
           success: true,
           message: 'Student updated successfully'
         };
       }
     }
-    
+
     return {
       success: false,
       error: 'Student not found'
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -162,7 +173,7 @@ function deleteStudent(studentId) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const rosterSheet = ss.getSheetByName(SHEET_NAMES.ROSTER);
     const data = rosterSheet.getDataRange().getValues();
-    
+
     for (let i = 1; i < data.length; i++) {
       if (data[i][0].toString() === studentId.toString()) {
         rosterSheet.deleteRow(i + 1);
@@ -172,12 +183,12 @@ function deleteStudent(studentId) {
         };
       }
     }
-    
+
     return {
       success: false,
       error: 'Student not found'
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -194,7 +205,7 @@ function addStaffMember(email, role, room = null) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
-    
+
     // Check if staff member already exists
     const data = configSheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
@@ -205,15 +216,15 @@ function addStaffMember(email, role, room = null) {
         };
       }
     }
-    
+
     // Add new staff member
     configSheet.appendRow(['STAFF', email, role, room || '']);
-    
+
     return {
       success: true,
       message: `Added ${email} as ${role}`
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -226,7 +237,7 @@ function getStaffList() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
   const data = configSheet.getDataRange().getValues();
-  
+
   const staff = [];
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === 'STAFF') {
@@ -237,7 +248,7 @@ function getStaffList() {
       });
     }
   }
-  
+
   return {
     success: true,
     staff: staff,
@@ -250,7 +261,7 @@ function removeStaffMember(email) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
     const data = configSheet.getDataRange().getValues();
-    
+
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] === 'STAFF' && data[i][1] === email) {
         configSheet.deleteRow(i + 1);
@@ -260,12 +271,12 @@ function removeStaffMember(email) {
         };
       }
     }
-    
+
     return {
       success: false,
       error: 'Staff member not found'
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -282,10 +293,10 @@ function generateCustomReport(reportType, startDate, endDate) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
   const data = archiveSheet.getDataRange().getValues();
-  
+
   const start = startDate ? new Date(startDate) : new Date(0);
   const end = endDate ? new Date(endDate) : new Date();
-  
+
   const filtered = [];
   const stats = {
     totalPasses: 0,
@@ -294,36 +305,48 @@ function generateCustomReport(reportType, startDate, endDate) {
     rooms: {},
     students: {}
   };
-  
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    const checkOutTime = new Date(row[6]);
-    
+
+    // Combine Date (column A, index 0) and Time (column H, index 7)
+    const dateObj = row[0];
+    const timeObj = row[7];
+
+    const checkOutTime = new Date(
+      dateObj.getFullYear(),
+      dateObj.getMonth(),
+      dateObj.getDate(),
+      timeObj.getHours(),
+      timeObj.getMinutes(),
+      timeObj.getSeconds()
+    );
+
     if (checkOutTime >= start && checkOutTime <= end) {
       filtered.push(row);
       stats.totalPasses++;
-      
-      // Count destinations
-      const dest = row[4];
+
+      // Count destinations (column F, index 5)
+      const dest = row[5];
       stats.destinations[dest] = (stats.destinations[dest] || 0) + 1;
-      
-      // Count rooms
-      const room = row[3];
+
+      // Count rooms (column E, index 4)
+      const room = row[4];
       stats.rooms[room] = (stats.rooms[room] || 0) + 1;
-      
-      // Count student passes
-      const studentId = row[1];
+
+      // Count student passes (column C, index 2)
+      const studentId = row[2];
       stats.students[studentId] = (stats.students[studentId] || 0) + 1;
-      
-      // Add to average duration
-      stats.averageDuration += row[9] || 0;
+
+      // Add to average duration (column K, index 10)
+      stats.averageDuration += row[10] || 0;
     }
   }
-  
+
   if (stats.totalPasses > 0) {
     stats.averageDuration = Math.round(stats.averageDuration / stats.totalPasses);
   }
-  
+
   return {
     success: true,
     reportType: reportType,
@@ -338,13 +361,13 @@ function generateCustomReport(reportType, startDate, endDate) {
 
 function getFrequentPassUsers(days = 30, threshold = 10) {
   const analytics = getAnalytics(days);
-  
+
   if (!analytics.success) {
     return analytics;
   }
-  
+
   const frequent = analytics.frequentUsers.filter(user => user.count >= threshold);
-  
+
   return {
     success: true,
     users: frequent,
@@ -357,34 +380,50 @@ function getStudentDetailedReport(studentId, days = 30) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
   const data = archiveSheet.getDataRange().getValues();
-  
+
   const now = new Date();
   const startDate = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
-  
+
   const passes = [];
   const destinations = {};
   let totalDuration = 0;
-  
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (row[1].toString() === studentId.toString()) {
-      const checkOutTime = new Date(row[6]);
-      
+
+    // StudentID is column C (index 2)
+    if (row[2].toString() === studentId.toString()) {
+      // Combine Date (column A, index 0) and Time (column H, index 7)
+      const dateObj = row[0];
+      const timeObj = row[7];
+
+      const checkOutTime = new Date(
+        dateObj.getFullYear(),
+        dateObj.getMonth(),
+        dateObj.getDate(),
+        timeObj.getHours(),
+        timeObj.getMinutes(),
+        timeObj.getSeconds()
+      );
+
       if (checkOutTime >= startDate) {
         passes.push({
           date: checkOutTime.toISOString(),
-          roomFrom: row[3],
-          destination: row[4],
-          duration: row[9],
-          checkInBy: row[10]
+          roomFrom: row[4],      // RoomFrom is column E (index 4)
+          destination: row[5],   // Destination is column F (index 5)
+          duration: row[10],     // DurationMinutes is column K (index 10)
+          checkInBy: row[11]     // CheckInBy is column L (index 11)
         });
-        
-        destinations[row[4]] = (destinations[row[4]] || 0) + 1;
-        totalDuration += row[9] || 0;
+
+        // Count destinations (column F, index 5)
+        destinations[row[5]] = (destinations[row[5]] || 0) + 1;
+
+        // Total duration (column K, index 10)
+        totalDuration += row[10] || 0;
       }
     }
   }
-  
+
   return {
     success: true,
     studentId: studentId,
@@ -403,10 +442,10 @@ function getStudentDetailedReport(studentId, days = 30) {
 function exportTodayData() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
+
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  
+
   return exportArchiveData(today.toISOString(), tomorrow.toISOString());
 }
 
@@ -414,14 +453,14 @@ function exportWeekData() {
   const today = new Date();
   const weekAgo = new Date(today);
   weekAgo.setDate(weekAgo.getDate() - 7);
-  
+
   return exportArchiveData(weekAgo.toISOString(), today.toISOString());
 }
 
 function exportMonthData() {
   const today = new Date();
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  
+
   return exportArchiveData(monthStart.toISOString(), today.toISOString());
 }
 
@@ -433,15 +472,15 @@ function getSystemSettings() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
   const data = configSheet.getDataRange().getValues();
-  
+
   const settings = {};
-  
+
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === 'SETTING') {
       settings[data[i][1]] = data[i][2];
     }
   }
-  
+
   return {
     success: true,
     settings: settings
@@ -453,7 +492,7 @@ function updateSystemSetting(settingName, value) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
     const data = configSheet.getDataRange().getValues();
-    
+
     // Check if setting exists
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] === 'SETTING' && data[i][1] === settingName) {
@@ -464,15 +503,15 @@ function updateSystemSetting(settingName, value) {
         };
       }
     }
-    
+
     // If not found, add new setting
     configSheet.appendRow(['SETTING', settingName, value, '']);
-    
+
     return {
       success: true,
       message: 'Setting added successfully'
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -489,20 +528,20 @@ function archiveDataByDate(beforeDate) {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
-    
+
     // Create new archive sheet with timestamp
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
     const newSheetName = `Archive_${timestamp}`;
-    
+
     const newSheet = ss.insertSheet(newSheetName);
-    
+
     // Copy data older than specified date
     const data = archiveSheet.getDataRange().getValues();
     const cutoffDate = new Date(beforeDate);
-    
+
     const archived = [data[0]]; // Headers
     const remaining = [data[0]]; // Headers
-    
+
     for (let i = 1; i < data.length; i++) {
       const rowDate = new Date(data[i][6]);
       if (rowDate < cutoffDate) {
@@ -511,25 +550,25 @@ function archiveDataByDate(beforeDate) {
         remaining.push(data[i]);
       }
     }
-    
+
     // Write archived data to new sheet
     if (archived.length > 1) {
       newSheet.getRange(1, 1, archived.length, archived[0].length).setValues(archived);
     }
-    
+
     // Clear and rewrite remaining data
     archiveSheet.clear();
     if (remaining.length > 0) {
       archiveSheet.getRange(1, 1, remaining.length, remaining[0].length).setValues(remaining);
     }
-    
+
     return {
       success: true,
       archivedCount: archived.length - 1,
       newSheetName: newSheetName,
       message: `Archived ${archived.length - 1} records to ${newSheetName}`
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -540,7 +579,7 @@ function archiveDataByDate(beforeDate) {
 
 function getSystemHealthCheck() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  
+
   const health = {
     sheetsPresent: true,
     rosterCount: 0,
@@ -549,7 +588,7 @@ function getSystemHealthCheck() {
     staffCount: 0,
     errors: []
   };
-  
+
   try {
     // Check all sheets exist
     const requiredSheets = ['StudentRoster', 'ActivePasses', 'Archive', 'Config'];
@@ -559,37 +598,37 @@ function getSystemHealthCheck() {
         health.errors.push(`Missing sheet: ${sheetName}`);
       }
     });
-    
+
     // Count records
     if (health.sheetsPresent) {
       health.rosterCount = ss.getSheetByName('StudentRoster').getLastRow() - 1;
       health.activeCount = ss.getSheetByName('ActivePasses').getLastRow() - 1;
       health.archiveCount = ss.getSheetByName('Archive').getLastRow() - 1;
-      
+
       const configData = ss.getSheetByName('Config').getDataRange().getValues();
       health.staffCount = configData.filter(row => row[0] === 'STAFF').length;
     }
-    
+
     // Check for any passes that have been out too long
     const activeSheet = ss.getSheetByName('ActivePasses');
     const activeData = activeSheet.getDataRange().getValues();
     const now = new Date();
-    
+
     for (let i = 1; i < activeData.length; i++) {
       const checkOutTime = new Date(activeData[i][6]);
       const minutes = Math.floor((now - checkOutTime) / 60000);
-      
+
       if (minutes > 60) {
         health.errors.push(`${activeData[i][2]} has been out for ${minutes} minutes`);
       }
     }
-    
+
     return {
       success: true,
       health: health,
       timestamp: new Date().toISOString()
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -606,17 +645,17 @@ function createBackup() {
   try {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd_HHmmss');
-    
+
     // Create a copy of the spreadsheet
     const backup = ss.copy(`Hall Pass Backup - ${timestamp}`);
-    
+
     return {
       success: true,
       backupId: backup.getId(),
       backupUrl: backup.getUrl(),
       message: `Backup created: ${backup.getName()}`
     };
-    
+
   } catch (error) {
     return {
       success: false,
@@ -627,7 +666,7 @@ function createBackup() {
 
 function showHealthCheck() {
   const health = getSystemHealthCheck();
-  
+
   if (health.success) {
     let message = 'SYSTEM HEALTH CHECK\n\n';
     message += `✓ Sheets Present: ${health.health.sheetsPresent}\n`;
@@ -635,7 +674,7 @@ function showHealthCheck() {
     message += `✓ Active Passes: ${health.health.activeCount}\n`;
     message += `✓ Archived Passes: ${health.health.archiveCount}\n`;
     message += `✓ Staff Members: ${health.health.staffCount}\n\n`;
-    
+
     if (health.health.errors.length > 0) {
       message += 'WARNINGS:\n';
       health.health.errors.forEach(err => {
@@ -644,7 +683,7 @@ function showHealthCheck() {
     } else {
       message += '✓ No issues detected';
     }
-    
+
     SpreadsheetApp.getUi().alert('System Health', message, SpreadsheetApp.getUi().ButtonSet.OK);
   } else {
     SpreadsheetApp.getUi().alert('Error', health.error, SpreadsheetApp.getUi().ButtonSet.OK);
@@ -658,28 +697,28 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
       const parts = dateStr.split('-');
       return new Date(parts[2], parts[0] - 1, parts[1], 0, 0, 0); // year, month (0-indexed), day
     };
-    
+
     const startDate = parseDate(startDateStr);
     const endDate = parseDate(endDateStr);
-    
+
     // Make end date inclusive (end of day)
     endDate.setHours(23, 59, 59, 999);
-    
+
     Logger.log('Exporting from ' + startDate + ' to ' + endDate);
-    
+
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const archiveSheet = ss.getSheetByName(SHEET_NAMES.ARCHIVE);
     const data = archiveSheet.getDataRange().getValues();
-    
+
     // Filter data by date range (inclusive)
     const filtered = [data[0]]; // Headers
-    
+
     for (let i = 1; i < data.length; i++) {
       // Date is now in column A (index 0), CheckOutTime in column H (index 7)
       // Both are Date objects, so we need to combine them properly
       const dateObj = data[i][0];  // Date object with the date
       const timeObj = data[i][7];  // Date object with the time (from 1899)
-      
+
       // Combine date from column A with time from column H
       const checkOutTime = new Date(
         dateObj.getFullYear(),
@@ -689,9 +728,9 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
         timeObj.getMinutes(),
         timeObj.getSeconds()
       );
-      
+
       Logger.log('Row ' + i + ': CheckOutTime = ' + checkOutTime);
-      
+
       if (checkOutTime >= startDate && checkOutTime <= endDate) {
         filtered.push(data[i]);
         Logger.log('  ✓ Included');
@@ -699,45 +738,45 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
         Logger.log('  ✗ Excluded (outside date range)');
       }
     }
-    
+
     if (filtered.length === 1) {
       return {
         success: false,
         error: 'No data found for the specified date range'
       };
     }
-    
+
     // Create temporary sheet for export
     const tempSheetName = 'Export_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd-yyyy_HHmmss');
     const tempSheet = ss.insertSheet(tempSheetName);
-    
+
     // Write filtered data
     tempSheet.getRange(1, 1, filtered.length, filtered[0].length).setValues(filtered);
-    
+
     // Format the CheckOutTime (column H = 8) and CheckInTime (column J = 10) columns as time-only
     if (filtered.length > 1) {
       // Format column H (CheckOutTime) - index 8
       tempSheet.getRange(2, 8, filtered.length - 1, 1).setNumberFormat('h:mm:ss AM/PM');
-      
+
       // Format column J (CheckInTime) - index 10
       tempSheet.getRange(2, 10, filtered.length - 1, 1).setNumberFormat('h:mm:ss AM/PM');
     }
-    
+
     // Format the sheet
     const headerRange = tempSheet.getRange(1, 1, 1, filtered[0].length);
     headerRange.setBackground('#00008b')
       .setFontColor('#ffffff')
       .setFontWeight('bold')
       .setWrap(true);
-    
+
     // Auto-resize columns
     for (let i = 1; i <= filtered[0].length; i++) {
       tempSheet.autoResizeColumn(i);
     }
-    
+
     // Freeze header row
     tempSheet.setFrozenRows(1);
-    
+
     // Add title and date range
     tempSheet.insertRowBefore(1);
     tempSheet.getRange(1, 1, 1, filtered[0].length).merge();
@@ -745,23 +784,23 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
       .setFontSize(14)
       .setFontWeight('bold')
       .setHorizontalAlignment('center');
-    
+
     tempSheet.insertRowBefore(2);
     tempSheet.getRange(2, 1, 1, filtered[0].length).merge();
     tempSheet.getRange(2, 1).setValue('Date Range: ' + startDateStr + ' to ' + endDateStr)
       .setFontSize(10)
       .setFontStyle('italic')
       .setHorizontalAlignment('center');
-    
+
     tempSheet.insertRowBefore(3);
     tempSheet.getRange(3, 1, 1, filtered[0].length).merge();
     tempSheet.getRange(3, 1).setValue('Generated: ' + new Date().toLocaleString())
       .setFontSize(10)
       .setFontStyle('italic')
       .setHorizontalAlignment('center');
-    
+
     tempSheet.insertRowBefore(4); // Blank row
-    
+
     // Create PDF
     const url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=pdf&gid=' + tempSheet.getSheetId() +
       '&portrait=false' + // Landscape
@@ -771,20 +810,20 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
       '&sheetnames=false' +
       '&pagenum=UNDEFINED' +
       '&attachment=true';
-    
+
     const token = ScriptApp.getOAuthToken();
     const response = UrlFetchApp.fetch(url, {
       headers: {
         'Authorization': 'Bearer ' + token
       }
     });
-    
+
     const pdfBlob = response.getBlob();
     const base64Data = Utilities.base64Encode(pdfBlob.getBytes());
-    
+
     // Delete temporary sheet
     ss.deleteSheet(tempSheet);
-    
+
     return {
       success: true,
       message: 'PDF generated successfully!',
@@ -792,7 +831,7 @@ function exportArchiveToPDF(startDateStr, endDateStr) {
       fileName: 'HallPass_Export_' + startDateStr + '_to_' + endDateStr + '.pdf',
       pdfData: base64Data
     };
-    
+
   } catch (error) {
     Logger.log('Error exporting to PDF: ' + error.toString());
     return {

@@ -164,35 +164,42 @@ function createConfigSheet(ss) {
   sheet = ss.insertSheet('Config');
 
   const headers = [
-    ['Type', 'Email/Setting', 'Role/Value', 'Room/Extra']
+    ['Type', 'Email/Setting', 'Role/Value', 'Room/Extra', 'Dropdown']
   ];
 
-  sheet.getRange(1, 1, 1, 4).setValues(headers);
+  sheet.getRange(1, 1, 1, 5).setValues(headers);  // Change to 5 columns
 
-  sheet.getRange(1, 1, 1, 4)
+  sheet.getRange(1, 1, 1, 5)  // Change to 5
     .setBackground('#ea4335')
     .setFontColor('#ffffff')
     .setFontWeight('bold');
 
   // Add sample configuration
   const sampleConfig = [
-    ['STAFF', 'admin@school.org', 'admin', ''],
-    ['STAFF', 'teacher1@school.org', 'teacher', '101'],
-    ['STAFF', 'teacher2@school.org', 'teacher', '102'],
-    ['STAFF', 'teacher3@school.org', 'teacher', '103'],
+    ['STAFF', 'admin@ofcs.net', 'admin', '', 'Admin'],
+    ['STAFF', 'teacher1@ofcs.net', 'teacher', '101', 'Teacher1 (101)'],
+    ['STAFF', 'teacher2@ofcs.net', 'teacher', '102', 'Teacher2 (102)'],
     ['', '', '', ''],
-    ['SETTING', 'SCHOOL_NAME', 'Lincoln High School', ''],
+    ['SETTING', 'SCHOOL_NAME', 'Olmsted Falls High School', ''],
     ['SETTING', 'SCHOOL_YEAR', '2024-2025', ''],
-    ['SETTING', 'MAX_CHECKOUT_MINUTES', '30', ''],
+    ['SETTING', 'MAX_CHECKOUT_MINUTES', '46', ''],
+    ['SETTING', 'CHECKOUT_ENABLED', 'TRUE', ''],
+    ['SETTING', 'DAY_END', '2:46 PM (EST)', ''],
+    ['SETTING', 'SETTINGS_VERSION', '1', ''],
+    ['DESTINATION', 'Restroom', '', ''],
+    ['DESTINATION', 'Nurse', '', ''],
+    ['DESTINATION', 'Guidance', '', ''],
+    ['DESTINATION', 'Other', '', ''],
   ];
 
-  sheet.getRange(2, 1, sampleConfig.length, 4).setValues(sampleConfig);
+  sheet.getRange(2, 1, sampleConfig.length, 5).setValues(sampleConfig);
 
   // Set column widths
   sheet.setColumnWidth(1, 100);  // Type
   sheet.setColumnWidth(2, 250);  // Email/Setting
   sheet.setColumnWidth(3, 150);  // Role/Value
   sheet.setColumnWidth(4, 100);  // Room/Extra
+  sheet.setColumnWidth(5, 200);  // Dropdown (ADD THIS)
 
   sheet.setFrozenRows(1);
 
@@ -706,7 +713,7 @@ function updateCheckoutSetting(enabled) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);  // ← ADD THIS
     const configSheet = ss.getSheetByName(SHEET_NAMES.CONFIG);
     const configData = configSheet.getDataRange().getValues();
-    
+
     // Find CHECKOUT_ENABLED setting
     let found = false;
     for (let i = 1; i < configData.length; i++) {
@@ -716,12 +723,12 @@ function updateCheckoutSetting(enabled) {
         break;
       }
     }
-    
+
     // If not found, add it
     if (!found) {
       configSheet.appendRow(['SETTING', 'CHECKOUT_ENABLED', enabled ? 'TRUE' : 'FALSE', '', '']);
     }
-    
+
     // Increment settings version to bust cache
     let versionFound = false;
     for (let i = 1; i < configData.length; i++) {
@@ -733,22 +740,22 @@ function updateCheckoutSetting(enabled) {
         break;
       }
     }
-    
+
     // If SETTINGS_VERSION doesn't exist, create it
     if (!versionFound) {
       configSheet.appendRow(['SETTING', 'SETTINGS_VERSION', '1', '', '']);
       Logger.log('Created SETTINGS_VERSION = 1');
     }
-    
+
     const ui = SpreadsheetApp.getUi();
     ui.alert(
       enabled ? 'Checkouts Enabled' : 'Checkouts Disabled',
-      enabled 
-        ? '✅ Students can now check out.' 
+      enabled
+        ? '✅ Students can now check out.'
         : '⛔ Checkouts are now disabled.\n\nStudents will see a message that hall passes are not available.',
       ui.ButtonSet.OK
     );
-    
+
   } catch (error) {
     Logger.log('Error updating checkout setting: ' + error.toString());
     SpreadsheetApp.getUi().alert('Error', 'Failed to update setting: ' + error.toString(), SpreadsheetApp.getUi().ButtonSet.OK);

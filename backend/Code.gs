@@ -1090,7 +1090,7 @@ function getTodayPasses(params) {
 // ============================================
 
 function updateArchivedPass(params) {
-  const { passId, roomFrom, destination, checkOutTime, checkInTime } = params;
+  const { passId, studentId, studentName, roomFrom, destination, checkOutTime, checkInTime } = params;
 
   Logger.log("Updating archived pass: " + passId);
 
@@ -1152,6 +1152,15 @@ function updateArchivedPass(params) {
   // Update the row
   // Archive columns: Date | PassID | StudentID | StudentName | RoomFrom | Destination | CustomDestination | CheckOutTime | Status | CheckInTime | DurationMinutes | CheckInBy
   archiveSheet.getRange(passRow, 1).setValue(dateOnly); // Column A: Date
+  
+  // Update student info if provided
+  if (studentId) {
+    archiveSheet.getRange(passRow, 3).setValue(studentId); // Column C: StudentID
+  }
+  if (studentName) {
+    archiveSheet.getRange(passRow, 4).setValue(studentName); // Column D: StudentName
+  }
+  
   archiveSheet.getRange(passRow, 5).setValue(roomFrom); // Column E: RoomFrom
   archiveSheet.getRange(passRow, 6).setValue(destination); // Column F: Destination
   archiveSheet.getRange(passRow, 8).setValue(checkOutTimeFormatted); // Column H: CheckOutTime
@@ -1167,6 +1176,8 @@ function updateArchivedPass(params) {
     success: true,
     message: "Pass updated successfully",
     passId: passId,
+    studentId: studentId,
+    studentName: studentName,
     checkOutTime: newCheckOutTime.toISOString(),
     checkInTime: newCheckInTime ? newCheckInTime.toISOString() : null,
     duration: durationMinutes,
@@ -1280,3 +1291,4 @@ function refreshStaffDropdownCache() {
     };
   }
 }
+
