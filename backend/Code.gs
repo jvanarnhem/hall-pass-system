@@ -484,7 +484,6 @@ function getAnalytics(days) {
       count: dailyCount[id].count,
       date: now.toISOString(),
     }))
-    .filter((u) => u.count >= 3)
     .sort((a, b) => b.count - a.count);
 
   return {

@@ -1,11 +1,6 @@
 // src/components/StudentCheckOut.jsx
 import React, { useState, useEffect } from "react";
-import {
-  LogOut,
-  AlertCircle,
-  CheckCircle,
-  RefreshCw,
-} from "lucide-react";
+import { LogOut, AlertCircle, CheckCircle, RefreshCw } from "lucide-react";
 import { swr } from "../lib/swrCache";
 import {
   TIMEOUTS,
@@ -182,8 +177,10 @@ const StudentCheckOut = ({ roomNumber, api }) => {
   };
 
   const handleSubmit = async () => {
+    // Prevent double-submission
     if (submitting) return;
 
+    // Check if checkout is blocked
     if (checkoutBlocked) {
       setStatus({
         type: "error",
@@ -192,6 +189,7 @@ const StudentCheckOut = ({ roomNumber, api }) => {
       return;
     }
 
+    // Validate inputs
     if (studentId.length !== 6) {
       setStatus({ type: "error", message: "Student ID must be 6 digits" });
       return;
@@ -207,11 +205,13 @@ const StudentCheckOut = ({ roomNumber, api }) => {
       return;
     }
 
+    // Start loading - NO optimistic UI
     setLoading(true);
     setSubmitting(true);
     setStatus(null);
 
     try {
+      // Step 1: Verify student exists
       const studentCheck = await api.getStudentName(studentId);
 
       if (!studentCheck.success || !studentCheck.studentName) {
@@ -224,6 +224,29 @@ const StudentCheckOut = ({ roomNumber, api }) => {
         return;
       }
 
+      // Step 2: Auto check-in any expired passes
+      await api.autoCheckInExpiredPasses();
+
+      // Step 3: Actually create the checkout (WAIT for it to complete)
+      const result = await api.checkOut(
+        studentId,
+        destination,
+        roomNumber,
+        destination === "other" ? customDestination : null
+      );
+
+      // Step 4: Check if it succeeded
+      if (!result.success) {
+        setStatus({
+          type: "error",
+          message: result.error || "Checkout failed. Please try again.",
+        });
+        setLoading(false);
+        setSubmitting(false);
+        return;
+      }
+
+      // SUCCESS - Now we know it worked!
       const finalDestination =
         destination === "other" ? customDestination : destination;
 
@@ -232,45 +255,27 @@ const StudentCheckOut = ({ roomNumber, api }) => {
         message: `${studentCheck.studentName} checked out successfully. Please proceed to ${finalDestination}.`,
       });
 
-      const savedStudentId = studentId;
-      const savedDestination = destination;
-      const savedCustomDestination = customDestination;
-
+      // Clear the form
       setStudentId("");
       setDestination("");
       setCustomDestination("");
       setLoading(false);
+      setSubmitting(false);
 
-      setTimeout(async () => {
-        try {
-          await api.autoCheckInExpiredPasses();
-          const result = await api.checkOut(
-            savedStudentId,
-            savedDestination,
-            roomNumber,
-            savedDestination === "other" ? savedCustomDestination : null
-          );
-
-          if (!result.success) {
-            setStatus({
-              type: "error",
-              message: result.error || "Checkout failed. Please try again.",
-            });
-          } else {
-            setTimeout(() => {
-              setStatus(null);
-            }, TIMEOUTS.SUCCESS_MESSAGE);
-          }
-        } catch (error) {
-          console.error("Background checkout error:", error);
-        } finally {
-          setSubmitting(false);
-        }
-      }, TIMEOUTS.BACKGROUND_SUBMIT);
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setStatus(null);
+      }, TIMEOUTS.SUCCESS_MESSAGE);
     } catch (error) {
+      console.error("Checkout error:", error);
+
+      // Network/connection error
       setStatus({
         type: "error",
-        message: "System error. Please contact your teacher.",
+        message:
+          error.message?.includes("fetch") || error.message?.includes("network")
+            ? "Connection error. Please check your internet and try again."
+            : "System error. Please contact your teacher.",
       });
       setLoading(false);
       setSubmitting(false);

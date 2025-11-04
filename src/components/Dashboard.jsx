@@ -573,12 +573,18 @@ const TodayView = ({ userRole, userRoom, api }) => {
 };
 
 // Analytics Component
+// Analytics Component
 const AnalyticsView = ({ api }) => {
   const [analytics, setAnalytics] = useState(null);
   const [monthlyThreshold, setMonthlyThreshold] = useState(10);
   const [dailyThreshold, setDailyThreshold] = useState(3);
   const [loading, setLoading] = useState(false);
   const [days, setDays] = useState(30);
+
+  // Student Lookup states
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentResult, setStudentResult] = useState(null);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   useEffect(() => {
     loadAnalytics();
@@ -598,6 +604,132 @@ const AnalyticsView = ({ api }) => {
     }
   };
 
+  const handleStudentSearch = async () => {
+    if (!studentSearch.trim()) {
+      setStudentResult(null);
+      return;
+    }
+
+    setSearchLoading(true);
+    setStudentResult(null);
+
+    try {
+      // Search in analytics data for matching student
+      if (!analytics) {
+        setSearchLoading(false);
+        return;
+      }
+
+      const searchLower = studentSearch.toLowerCase().trim();
+
+      // Find in frequent users (monthly data)
+      const foundStudent = analytics.frequentUsers.find(
+        (user) =>
+          user.studentId.toString().includes(searchLower) ||
+          user.name.toLowerCase().includes(searchLower)
+      );
+
+      if (foundStudent) {
+        // Calculate additional stats
+        const dailyEntry = analytics.dailyMultiple.find(
+          (u) => u.studentId === foundStudent.studentId
+        );
+
+        setStudentResult({
+          found: true,
+          studentId: foundStudent.studentId,
+          name: foundStudent.name,
+          totalPasses: foundStudent.count,
+          todayPasses: dailyEntry ? dailyEntry.count : 0,
+          period: days,
+        });
+      } else {
+        // Student not found in analytics
+        setStudentResult({
+          found: false,
+          searchTerm: studentSearch,
+        });
+      }
+    } catch (error) {
+      console.error("Error searching student:", error);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const loadStudentDetails = async (studentId) => {
+    // Toggle visibility if already loaded
+    if (studentResult.detailsVisible) {
+      setStudentResult({
+        ...studentResult,
+        detailsVisible: false,
+      });
+      return;
+    }
+
+    // Show loading state
+    setStudentResult({
+      ...studentResult,
+      loadingDetails: true,
+    });
+
+    try {
+      // Get detailed pass history from backend
+      const result = await api.getStudentDetailedReport(studentId, days);
+
+      if (result.success && result.passes) {
+        setStudentResult({
+          ...studentResult,
+          loadingDetails: false,
+          detailsVisible: true,
+          passHistory: result.passes.map((pass) => ({
+            date: pass.date,
+            roomFrom: pass.roomFrom,
+            destination: pass.destination,
+            checkOutTime: new Date(pass.date).toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            }),
+            checkInTime: pass.checkInBy
+              ? new Date(pass.date).toLocaleTimeString("en-US", {
+                  hour: "numeric",
+                  minute: "2-digit",
+                  hour12: true,
+                })
+              : null,
+            duration: pass.duration,
+            status: pass.checkInBy ? "IN" : "OUT",
+          })),
+        });
+      } else {
+        setStudentResult({
+          ...studentResult,
+          loadingDetails: false,
+          detailsVisible: true,
+          passHistory: [],
+        });
+      }
+    } catch (error) {
+      console.error("Error loading student details:", error);
+      setStudentResult({
+        ...studentResult,
+        loadingDetails: false,
+      });
+    }
+  };
+
+  const handleSearchKeyPress = (e) => {
+    if (e.key === "Enter") {
+      handleStudentSearch();
+    }
+  };
+
+  const clearSearch = () => {
+    setStudentSearch("");
+    setStudentResult(null);
+  };
+
   if (loading || !analytics) {
     return (
       <div className="text-center py-8">
@@ -609,6 +741,223 @@ const AnalyticsView = ({ api }) => {
 
   return (
     <div className="space-y-6">
+      {/* STUDENT LOOKUP SECTION */}
+      <div className="bg-white rounded-lg shadow-sm p-6 border-2 border-indigo-100">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Student Lookup
+        </h2>
+
+        <div className="flex gap-3 mb-4">
+          <div className="flex-1 relative">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              size={20}
+            />
+            <input
+              type="text"
+              value={studentSearch}
+              onChange={(e) => setStudentSearch(e.target.value)}
+              onKeyPress={handleSearchKeyPress}
+              placeholder="Search by student name or ID..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+
+          <button
+            onClick={handleStudentSearch}
+            disabled={searchLoading || !studentSearch.trim()}
+            className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {searchLoading ? (
+              <>
+                <RefreshCw size={18} className="animate-spin" />
+                Searching...
+              </>
+            ) : (
+              <>
+                <Search size={18} />
+                Search
+              </>
+            )}
+          </button>
+
+          {studentSearch && (
+            <button
+              onClick={clearSearch}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        {/* Search Results */}
+        {studentResult && (
+          <div
+            className={`p-4 rounded-lg border-2 ${
+              studentResult.found
+                ? "bg-blue-50 border-blue-200"
+                : "bg-yellow-50 border-yellow-200"
+            }`}
+          >
+            {studentResult.found ? (
+              <div>
+                <div className="flex items-center gap-3 mb-3">
+                  <User size={24} className="text-indigo-600" />
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-lg">
+                      {studentResult.name}
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      ID: {studentResult.studentId}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 mt-4">
+                  <div className="bg-white p-3 rounded-lg">
+                    <p className="text-xs text-gray-600 mb-1">
+                      Last {studentResult.period} Days
+                    </p>
+                    <p className="text-2xl font-bold text-indigo-600">
+                      {studentResult.totalPasses}
+                    </p>
+                    <p className="text-xs text-gray-600">total passes</p>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-lg">
+                    <p className="text-xs text-gray-600 mb-1">Today</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {studentResult.todayPasses}
+                    </p>
+                    <p className="text-xs text-gray-600">passes</p>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-lg">
+                    <p className="text-xs text-gray-600 mb-1">Daily Avg</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {(
+                        studentResult.totalPasses / studentResult.period
+                      ).toFixed(1)}
+                    </p>
+                    <p className="text-xs text-gray-600">per day</p>
+                  </div>
+                </div>
+
+                {/* View Details Button */}
+                <div className="mt-4 flex justify-center">
+                  <button
+                    onClick={() => loadStudentDetails(studentResult.studentId)}
+                    disabled={studentResult.loadingDetails}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-gray-400 flex items-center gap-2"
+                  >
+                    {studentResult.loadingDetails ? (
+                      <>
+                        <RefreshCw size={16} className="animate-spin" />
+                        Loading...
+                      </>
+                    ) : studentResult.detailsVisible ? (
+                      <>
+                        <User size={16} />
+                        Hide Details
+                      </>
+                    ) : (
+                      <>
+                        <User size={16} />
+                        View All {studentResult.totalPasses} Passes
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Detailed Pass History */}
+                {studentResult.detailsVisible && studentResult.passHistory && (
+                  <div className="mt-4 border-t-2 border-indigo-200 pt-4">
+                    <h4 className="font-semibold text-gray-800 mb-3">
+                      Pass History ({studentResult.passHistory.length} passes)
+                    </h4>
+
+                    {studentResult.passHistory.length === 0 ? (
+                      <p className="text-gray-500 text-sm">
+                        No pass history found
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {studentResult.passHistory.map((pass, index) => (
+                          <div
+                            key={index}
+                            className="bg-white p-3 rounded-lg border border-gray-200 text-sm"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-gray-900">
+                                {new Date(pass.date).toLocaleDateString(
+                                  "en-US",
+                                  {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  }
+                                )}
+                              </span>
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-medium ${
+                                  pass.status === "OUT"
+                                    ? "bg-orange-100 text-orange-700"
+                                    : "bg-green-100 text-green-700"
+                                }`}
+                              >
+                                {pass.status === "OUT"
+                                  ? "Currently Out"
+                                  : "Completed"}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                              <div>
+                                <span className="font-medium">From:</span> Room{" "}
+                                {pass.roomFrom}
+                              </div>
+                              <div>
+                                <span className="font-medium">To:</span>{" "}
+                                {pass.destination}
+                              </div>
+                              <div>
+                                <span className="font-medium">Out:</span>{" "}
+                                {pass.checkOutTime}
+                              </div>
+                              {pass.checkInTime && (
+                                <div>
+                                  <span className="font-medium">In:</span>{" "}
+                                  {pass.checkInTime}
+                                </div>
+                              )}
+                              {pass.duration && (
+                                <div className="col-span-2">
+                                  <span className="font-medium">Duration:</span>{" "}
+                                  {pass.duration} minutes
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <AlertCircle size={20} className="text-yellow-600" />
+                <p className="text-sm text-gray-700">
+                  No student found matching "{studentResult.searchTerm}" in the
+                  last {days} days.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* EXISTING ANALYTICS SECTIONS */}
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
           Time Period

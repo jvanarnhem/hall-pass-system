@@ -134,7 +134,21 @@ const api = {
       return { success: false, error: error.message };
     }
   },
-
+  async getStudentDetailedReport(studentId, days = 30) {
+    try {
+      const params = new URLSearchParams({
+        action: "getStudentDetailedReport",
+        studentId: studentId.toString(),
+        days: days.toString(),
+      });
+      const response = await fetch(`${API_BASE}?${params}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error("Get student detailed report error:", error);
+      return { success: false, error: error.message, passes: [] };
+    }
+  },
   async autoCheckInExpiredPasses() {
     try {
       const params = new URLSearchParams({
