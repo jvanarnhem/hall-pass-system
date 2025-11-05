@@ -1,9 +1,11 @@
 // src/constants.js
 
 // Refresh intervals for data polling
+// Refresh intervals for data polling
 export const REFRESH_INTERVALS = {
-  ACTIVE_PASSES: 10 * 1000,  // 10 seconds
-  TODAY_PASSES: 30 * 1000,   // 30 seconds
+  ACTIVE_PASSES: 15 * 1000,  // 15 seconds
+  TODAY_PASSES: 60 * 1000,   // 60 seconds
+  AUTO_CHECKIN: 15 * 60 * 1000,  // 15 minutes
 };
 
 // Timeout durations

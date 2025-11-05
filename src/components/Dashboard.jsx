@@ -1098,14 +1098,6 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
   const [rooms, setRooms] = useState([]);
   const [destinations, setDestinations] = useState([]);
 
-  useEffect(() => {
-    if (userRole === "teacher" && userRoom) {
-      setFilterRoom(String(userRoom));
-    } else {
-      setFilterRoom("");
-    }
-  }, [userRole, userRoom]);
-
   // Load data when filters change
   useEffect(() => {
     loadActivePasses();
@@ -1117,7 +1109,7 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
     loadDestinations();
   }, []);
 
-  // Auto-refresh interval (independent of filters)
+  // Auto-refresh active passes every 15 seconds
   useEffect(() => {
     const interval = setInterval(
       loadActivePasses,
@@ -1126,10 +1118,22 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
     return () => clearInterval(interval);
   }, []);
 
+  // Auto check-in expired passes every 15 minutes
+  useEffect(() => {
+    // Run immediately on mount
+    api.autoCheckInExpiredPasses();
+
+    // Then every 15 minutes
+    const interval = setInterval(
+      () => api.autoCheckInExpiredPasses(),
+      REFRESH_INTERVALS.AUTO_CHECKIN
+    );
+    return () => clearInterval(interval);
+  }, []);
+
   const loadActivePasses = async () => {
     setLoading(true);
     try {
-      await api.autoCheckInExpiredPasses();
       const result = await api.getActivePasses({
         roomFrom: filterRoom,
         destination: filterDestination,
