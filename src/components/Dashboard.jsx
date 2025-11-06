@@ -1097,6 +1097,16 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [destinations, setDestinations] = useState([]);
+  const [isTabVisible, setIsTabVisible] = useState(true);
+  const [checkingIn, setCheckingIn] = useState(new Set()); // Track which passes are being checked in
+
+  useEffect(() => {
+    if (userRole === "teacher" && userRoom) {
+      setFilterRoom(String(userRoom));
+    } else {
+      setFilterRoom("");
+    }
+  }, [userRole, userRoom]);
 
   // Load data when filters change
   useEffect(() => {
@@ -1109,25 +1119,57 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
     loadDestinations();
   }, []);
 
-  // Auto-refresh active passes every 15 seconds
+  // Visibility change handler - refresh when tab becomes visible
   useEffect(() => {
-    const interval = setInterval(
-      loadActivePasses,
-      REFRESH_INTERVALS.ACTIVE_PASSES
-    );
-    return () => clearInterval(interval);
+    const handleVisibilityChange = () => {
+      const visible = !document.hidden;
+      setIsTabVisible(visible);
+
+      if (visible) {
+        // Tab just became visible - refresh immediately
+        console.log("👁️ Tab visible - refreshing data");
+        loadActivePasses();
+      } else {
+        console.log("🙈 Tab hidden - pausing auto-refresh");
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-  // Auto check-in expired passes every 15 minutes
+  // Auto-refresh active passes - ONLY when tab is visible
+  useEffect(() => {
+    if (!isTabVisible) {
+      console.log("⏸️ Skipping auto-refresh setup - tab not visible");
+      return;
+    }
+
+    console.log("▶️ Starting auto-refresh - tab is visible");
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        console.log("🔄 Auto-refreshing active passes");
+        loadActivePasses();
+      }
+    }, REFRESH_INTERVALS.ACTIVE_PASSES);
+
+    return () => {
+      console.log("⏹️ Stopping auto-refresh");
+      clearInterval(interval);
+    };
+  }, [isTabVisible]);
+
+  // Auto check-in expired passes every 15 minutes (independent of visibility)
   useEffect(() => {
     // Run immediately on mount
     api.autoCheckInExpiredPasses();
 
     // Then every 15 minutes
-    const interval = setInterval(
-      () => api.autoCheckInExpiredPasses(),
-      REFRESH_INTERVALS.AUTO_CHECKIN
-    );
+    const interval = setInterval(() => {
+      console.log("🔄 Running auto check-in");
+      api.autoCheckInExpiredPasses();
+    }, REFRESH_INTERVALS.AUTO_CHECKIN);
     return () => clearInterval(interval);
   }, []);
 
@@ -1177,14 +1219,38 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
   };
 
   const handleCheckIn = async (passId, studentName) => {
+    // Prevent double-click
+    if (checkingIn.has(passId)) {
+      console.log("⚠️ Already checking in:", passId);
+      return;
+    }
+
+    // Mark as checking in
+    setCheckingIn((prev) => new Set(prev).add(passId));
+
+    // Optimistically remove from UI
     setActivePasses((prev) => prev.filter((p) => p.id !== passId));
 
     try {
-      await api.checkIn(passId);
+      const result = await api.checkIn(passId);
+
+      if (!result.success) {
+        // If failed, add back to list
+        console.error("Check-in failed:", result.error);
+        alert(`Failed to check in ${studentName}. Please try again.`);
+        await loadActivePasses();
+      }
     } catch (error) {
       console.error("Error checking in:", error);
       alert("Error checking in student. Please try again.");
       await loadActivePasses();
+    } finally {
+      // Remove from checking-in set
+      setCheckingIn((prev) => {
+        const next = new Set(prev);
+        next.delete(passId);
+        return next;
+      });
     }
   };
 
@@ -1232,9 +1298,21 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
                   : `Room ${userRoom} - Teacher View`}
               </p>
               {lastUpdate && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Last updated: {lastUpdate.toLocaleTimeString()}
-                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-xs text-gray-500">
+                    Last updated: {lastUpdate.toLocaleTimeString()}
+                  </p>
+                  {!isTabVisible && (
+                    <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
+                      ⏸️ Paused (tab hidden)
+                    </span>
+                  )}
+                  {isTabVisible && (
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                      ▶️ Live
+                    </span>
+                  )}
+                </div>
               )}
             </div>
             <div className="flex gap-2">
