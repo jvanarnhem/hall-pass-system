@@ -13,17 +13,17 @@ import {
   onSnapshot,
   serverTimestamp,
   writeBatch,
-} from 'firebase/firestore';
-import { db } from './config';
+} from "firebase/firestore";
+import { db } from "./config";
 
 // Collections
 export const COLLECTIONS = {
-  STUDENTS: 'students',
-  STAFF: 'staff',
-  ACTIVE_PASSES: 'activePasses',
-  PASS_HISTORY: 'passHistory',
-  SETTINGS: 'settings',
-  DESTINATIONS: 'destinations',
+  STUDENTS: "students",
+  STAFF: "staff",
+  ACTIVE_PASSES: "activePasses",
+  PASS_HISTORY: "passHistory",
+  SETTINGS: "settings",
+  DESTINATIONS: "destinations",
 };
 
 // Get student by ID
@@ -31,14 +31,14 @@ export const getStudent = async (studentId) => {
   try {
     const docRef = doc(db, COLLECTIONS.STUDENTS, studentId);
     const docSnap = await getDoc(docRef);
-    
+
     if (docSnap.exists()) {
       return { success: true, student: { id: docSnap.id, ...docSnap.data() } };
     } else {
-      return { success: false, error: 'Student not found' };
+      return { success: false, error: "Student not found" };
     }
   } catch (error) {
-    console.error('Error getting student:', error);
+    console.error("Error getting student:", error);
     return { success: false, error: error.message };
   }
 };
@@ -48,18 +48,18 @@ export const getDestinations = async () => {
   try {
     const q = query(
       collection(db, COLLECTIONS.DESTINATIONS),
-      where('active', '==', true),
-      orderBy('order')
+      where("active", "==", true),
+      orderBy("order")
     );
     const snapshot = await getDocs(q);
-    const destinations = snapshot.docs.map(doc => ({
+    const destinations = snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
     }));
-    
+
     return { success: true, destinations };
   } catch (error) {
-    console.error('Error getting destinations:', error);
+    console.error("Error getting destinations:", error);
     return { success: false, error: error.message, destinations: [] };
   }
 };
@@ -67,58 +67,68 @@ export const getDestinations = async () => {
 // Get system settings
 export const getSystemSettings = async () => {
   try {
-    const docRef = doc(db, COLLECTIONS.SETTINGS, 'system');
+    const docRef = doc(db, COLLECTIONS.SETTINGS, "system");
     const docSnap = await getDoc(docRef);
-    
+
     if (docSnap.exists()) {
       return { success: true, settings: docSnap.data() };
     } else {
-      return { 
-        success: false, 
-        error: 'Settings not found',
+      return {
+        success: false,
+        error: "Settings not found",
         settings: {
           checkoutEnabled: true,
           maxCheckoutMinutes: 46,
           blockWeekends: true,
-        }
+        },
       };
     }
   } catch (error) {
-    console.error('Error getting settings:', error);
-    return { 
-      success: false, 
+    console.error("Error getting settings:", error);
+    return {
+      success: false,
       error: error.message,
       settings: {
         checkoutEnabled: true,
         maxCheckoutMinutes: 46,
         blockWeekends: true,
-      }
+      },
     };
   }
 };
 
 // Create checkout (student creates pass)
-export const createCheckout = async (studentId, destination, roomFrom, customDestination = null) => {
+export const createCheckout = async (
+  studentId,
+  studentName,
+  destination,
+  roomFrom,
+  customDestination = null
+) => {
   try {
     const passData = {
       studentId,
+      studentName, // <-- ADD THIS
       destination,
       roomFrom,
       customDestination,
       checkOutTime: serverTimestamp(),
-      status: 'OUT',
+      status: "OUT",
       createdAt: serverTimestamp(),
     };
-    
-    const docRef = await addDoc(collection(db, COLLECTIONS.ACTIVE_PASSES), passData);
-    
-    return { 
-      success: true, 
+
+    const docRef = await addDoc(
+      collection(db, COLLECTIONS.ACTIVE_PASSES),
+      passData
+    );
+
+    return {
+      success: true,
       passId: docRef.id,
-      checkOutTime: new Date().toISOString()
+      checkOutTime: new Date().toISOString(),
     };
   } catch (error) {
-    console.error('Error creating checkout:', error);
+    console.error("Error creating checkout:", error);
     return { success: false, error: error.message };
   }
 };
@@ -128,68 +138,78 @@ export const checkInPass = async (passId) => {
   try {
     const passRef = doc(db, COLLECTIONS.ACTIVE_PASSES, passId);
     const passSnap = await getDoc(passRef);
-    
+
     if (!passSnap.exists()) {
-      return { success: false, error: 'Pass not found' };
+      return { success: false, error: "Pass not found" };
     }
-    
+
     const passData = passSnap.data();
     const checkInTime = new Date();
     const checkOutTime = passData.checkOutTime?.toDate() || new Date();
     const duration = Math.round((checkInTime - checkOutTime) / 60000);
-    
+
     // Move to history
     await addDoc(collection(db, COLLECTIONS.PASS_HISTORY), {
       ...passData,
       passId,
       checkInTime: serverTimestamp(),
       duration,
-      status: 'IN',
+      status: "IN",
     });
-    
+
     // Delete from active
     await deleteDoc(passRef);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       checkInTime: checkInTime.toISOString(),
-      duration
+      duration,
     };
   } catch (error) {
-    console.error('Error checking in:', error);
+    console.error("Error checking in:", error);
     return { success: false, error: error.message };
   }
 };
 
-// Subscribe to active passes (real-time)
+// src/firebase/db.js
+
 export const subscribeToActivePasses = (callback, filters = {}) => {
-  let q = collection(db, COLLECTIONS.ACTIVE_PASSES);
-  
-  // Add filters if provided
-  const conditions = [where('status', '==', 'OUT')];
-  
-  if (filters.roomFrom) {
-    conditions.push(where('roomFrom', '==', filters.roomFrom));
-  }
-  
-  if (filters.destination) {
-    conditions.push(where('destination', '==', filters.destination));
-  }
-  
-  q = query(q, ...conditions, orderBy('checkOutTime', 'desc'));
-  
-  // Return unsubscribe function
-  return onSnapshot(q, 
+  console.log("🟢 subscribeToActivePasses called");
+
+  const q = query(
+    collection(db, COLLECTIONS.ACTIVE_PASSES),
+    where("status", "==", "OUT"),
+    orderBy("checkOutTime", "desc")
+  );
+
+  console.log("🟡 Setting up onSnapshot listener...");
+
+  return onSnapshot(
+    q,
     (snapshot) => {
-      const passes = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        checkOutTime: doc.data().checkOutTime?.toDate()?.toISOString(),
-      }));
+      console.log("🔵 Snapshot callback fired!");
+      console.log("📊 Snapshot size:", snapshot.size);
+      console.log("📦 Raw snapshot docs:", snapshot.docs.length);
+
+      const passes = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        console.log("📄 Processing doc:", doc.id);
+        console.log("   Raw data:", data);
+
+        return {
+          id: doc.id,
+          ...data,
+          checkOutTime: data.checkOutTime?.toDate()?.toISOString(),
+        };
+      });
+
+      console.log("✅ Final passes array:", passes);
       callback({ success: true, passes });
     },
     (error) => {
-      console.error('Error in active passes subscription:', error);
+      console.error("❌ Snapshot error:", error);
+      console.error("❌ Error code:", error.code);
+      console.error("❌ Error message:", error.message);
       callback({ success: false, error: error.message, passes: [] });
     }
   );

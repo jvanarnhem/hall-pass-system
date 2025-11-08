@@ -1,5 +1,8 @@
 // src/components/Dashboard.jsx
 import React, { useState, useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
+import { signOut } from "../firebase/auth";
 import {
   Search,
   BarChart3,
@@ -9,14 +12,46 @@ import {
   AlertCircle,
   CheckCircle,
   RefreshCw,
+  Home,
+  Edit, // Added Edit
+  Trash, // Added Trash
 } from "lucide-react";
 import { getTimeSince, formatTime, getTimeColor } from "../utils/timeHelpers";
 import { REFRESH_INTERVALS } from "../constants";
+import {
+  subscribeToActivePasses,
+  checkInPass,
+  getSystemSettings,
+  COLLECTIONS,
+} from "../firebase/db";
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  getDocs,
+  Timestamp,
+  getDoc,
+  doc,
+  writeBatch,
+  updateDoc,
+  deleteDoc,
+} from "firebase/firestore";
+import { db } from "../firebase/config";
 
-// Edit Pass Dialog Component
+// Debug helper: enable by running `localStorage.setItem('hp_debug','1')` in the console.
+// Disable with `localStorage.removeItem('hp_debug')`.
+const HP_DEBUG =
+  process.env.NODE_ENV !== "production" && localStorage.getItem("hp_debug") === "1";
+const dlog = (...args) => {
+  if (HP_DEBUG) console.log("[HallPass]", ...args);
+};
+
+// --- EditPassDialog Component (from your file) ---
 const EditPassDialog = ({ pass, onClose, onSave }) => {
+  //
   const [formData, setFormData] = useState({
-    studentId: String(pass.studentId || ""), // ← Ensure it's a string from the start
+    studentId: String(pass.studentId || ""),
     studentName: pass.studentName || "",
     roomFrom: pass.roomFrom || "",
     destination: pass.destination || "",
@@ -35,553 +70,551 @@ const EditPassDialog = ({ pass, onClose, onSave }) => {
         })
       : "",
   });
-  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = async () => {
-    // Basic validation
-    if (String(formData.studentId).length !== 6) {
-      alert("Student ID must be 6 digits");
-      return;
-    }
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
 
-    if (!formData.studentName.trim()) {
-      alert("Student name is required");
-      return;
-    }
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const [outHours, outMinutes] = formData.checkOutTime.split(":").map(Number);
+    const checkOutDate = new Date(pass.checkOutTime);
+    checkOutDate.setHours(outHours, outMinutes);
 
-    setSaving(true);
-
-    // Parse original checkout time to get the correct date
-    const originalDate = new Date(pass.checkOutTime);
-
-    // Create new times on the SAME date as original
-    const [checkOutHours, checkOutMinutes] = formData.checkOutTime.split(":");
-    const checkOutDateTime = new Date(
-      originalDate.getFullYear(),
-      originalDate.getMonth(),
-      originalDate.getDate(),
-      parseInt(checkOutHours),
-      parseInt(checkOutMinutes),
-      0
-    );
-
-    let checkInDateTime = null;
+    let checkInDate = null;
     if (formData.checkInTime) {
-      const [checkInHours, checkInMinutes] = formData.checkInTime.split(":");
-      checkInDateTime = new Date(
-        originalDate.getFullYear(),
-        originalDate.getMonth(),
-        originalDate.getDate(),
-        parseInt(checkInHours),
-        parseInt(checkInMinutes),
-        0
-      );
+      const [inHours, inMinutes] = formData.checkInTime.split(":").map(Number);
+      checkInDate = new Date(pass.checkInTime || pass.checkOutTime);
+      checkInDate.setHours(inHours, inMinutes);
     }
 
-    await onSave({
-      passId: pass.id,
+    onSave({
+      ...pass,
+      ...formData,
       studentId: String(formData.studentId),
-      studentName: formData.studentName,
-      roomFrom: formData.roomFrom,
-      destination: formData.destination,
-      checkOutTime: checkOutDateTime.toISOString(),
-      checkInTime: checkInDateTime ? checkInDateTime.toISOString() : null,
+      checkOutTime: checkOutDate.toISOString(),
+      checkInTime: checkInDate ? checkInDate.toISOString() : null,
     });
-
-    setSaving(false);
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-xl font-bold text-gray-800 mb-4">Edit Pass</h2>
-
-        <div className="space-y-4">
-          {/* Student ID - Now Editable */}
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-semibold mb-4">Edit Pass</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Student ID
-            </label>
+            <label className="block text-sm font-medium">Student ID</label>
             <input
               type="text"
+              name="studentId"
               value={formData.studentId}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  studentId: e.target.value.replace(/\D/g, "").slice(0, 6),
-                })
-              }
-              placeholder="6-digit ID"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              onChange={handleChange}
+              className="w-full p-2 border rounded-lg"
             />
           </div>
-
-          {/* Student Name - Now Editable */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Student Name
-            </label>
+            <label className="block text-sm font-medium">Student Name</label>
             <input
               type="text"
+              name="studentName"
               value={formData.studentName}
-              onChange={(e) =>
-                setFormData({ ...formData, studentName: e.target.value })
-              }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              onChange={handleChange}
+              className="w-full p-2 border rounded-lg"
             />
           </div>
-
-          {/* Room From */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              From Room
-            </label>
+            <label className="block text-sm font-medium">Room</label>
             <input
               type="text"
+              name="roomFrom"
               value={formData.roomFrom}
-              onChange={(e) =>
-                setFormData({ ...formData, roomFrom: e.target.value })
-              }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              onChange={handleChange}
+              className="w-full p-2 border rounded-lg"
             />
           </div>
-
-          {/* Destination */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              To Destination
-            </label>
+            <label className="block text-sm font-medium">Destination</label>
             <input
               type="text"
+              name="destination"
               value={formData.destination}
-              onChange={(e) =>
-                setFormData({ ...formData, destination: e.target.value })
-              }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              onChange={handleChange}
+              className="w-full p-2 border rounded-lg"
             />
           </div>
-
-          {/* Check Out Time */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Check Out Time
-            </label>
+            <label className="block text-sm font-medium">Time Out</label>
             <input
               type="time"
+              name="checkOutTime"
               value={formData.checkOutTime}
-              onChange={(e) =>
-                setFormData({ ...formData, checkOutTime: e.target.value })
-              }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              onChange={handleChange}
+              className="w-full p-2 border rounded-lg"
             />
           </div>
-
-          {/* Check In Time */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Check In Time{" "}
-              {pass.status === "OUT" && (
-                <span className="text-xs text-gray-500">(optional)</span>
-              )}
-            </label>
+            <label className="block text-sm font-medium">Time In</label>
             <input
               type="time"
+              name="checkInTime"
               value={formData.checkInTime}
-              onChange={(e) =>
-                setFormData({ ...formData, checkInTime: e.target.value })
-              }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              onChange={handleChange}
+              className="w-full p-2 border rounded-lg"
             />
           </div>
-        </div>
-
-        {/* Buttons */}
-        <div className="flex gap-3 mt-6">
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {saving ? (
-              <>
-                <RefreshCw size={18} className="animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Save Changes"
-            )}
-          </button>
-        </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              Save Changes
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 };
 
-// TodayView Component
-const TodayView = ({ userRole, userRoom, api }) => {
-  const [todayPasses, setTodayPasses] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [editingPass, setEditingPass] = useState(null);
-  const [filterRoom, setFilterRoom] = useState("");
+// --- TODAY VIEW (all-inclusive, drop-in) ---
+const TodayView = ({ userRole, userRoom }) => {
+  // UI state
+  const [loading, setLoading] = useState(true);
+  const [passes, setPasses] = useState([]);
+  const [search, setSearch] = useState("");
+  const [filterRoom, setFilterRoom] = useState(
+    userRole === "teacher" && userRoom ? String(userRoom) : ""
+  );
   const [filterDestination, setFilterDestination] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [rooms, setRooms] = useState([]);
-  const [destinations, setDestinations] = useState([]);
+  const [allRooms, setAllRooms] = useState([]);
+  const [allDestinations, setAllDestinations] = useState([]);
 
-  useEffect(() => {
-    if (userRole === "teacher" && userRoom) {
-      setFilterRoom(String(userRoom));
-    } else {
-      setFilterRoom("");
-    }
-  }, [userRole, userRoom]);
+  // Edit modal
+  const [editingPass, setEditingPass] = useState(null);
 
-  // Load data on filter changes
-  useEffect(() => {
-    loadTodayPasses();
-  }, [filterRoom, filterDestination, searchTerm]);
+  // ===== helpers =====
+  const norm = (v) =>
+    String(v ?? "")
+      .trim()
+      .toLowerCase();
 
-  // Load rooms and destinations once
+  const fmtTime = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  };
+
+  const fmtDuration = (startIso, endIso) => {
+    if (!startIso || !endIso) return "—";
+    const ms = new Date(endIso) - new Date(startIso);
+    if (isNaN(ms) || ms < 0) return "—";
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h ${m}m` : `${h}h`;
+  };
+
+  const StatusPill = ({ isOut }) => (
+    <span
+      className={
+        "inline-flex items-center gap-2 rounded-xl px-3 py-1 text-sm font-medium " +
+        (isOut ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700")
+      }
+      title={isOut ? "Currently out" : "Checked in"}
+    >
+      {isOut ? <Clock size={16} /> : <CheckCircle size={16} />}
+      {isOut ? "Out" : "Checked in"}
+    </span>
+  );
+
+  // ===== preload filter sources (rooms + destinations) =====
   useEffect(() => {
-    loadRooms();
-    loadDestinations();
+    (async () => {
+      try {
+        // Rooms from staff
+        const staffSnapshot = await getDocs(collection(db, COLLECTIONS.STAFF));
+        const rooms = staffSnapshot.docs
+          .map((d) => d.data()?.room)
+          .filter(Boolean)
+          .map((r) => String(r));
+        setAllRooms(
+          [...new Set(rooms)].sort((a, b) =>
+            a.localeCompare(b, undefined, { numeric: true })
+          )
+        );
+
+        // Destinations
+        const destSnap = await getDocs(
+          query(
+            collection(db, COLLECTIONS.DESTINATIONS),
+            where("active", "==", true),
+            orderBy("order")
+          )
+        );
+        setAllDestinations(
+          destSnap.docs.map((d) => d.data()?.name || d.id).filter(Boolean)
+        );
+      } catch (err) {
+        console.error("Filter preload error:", err);
+      }
+    })();
   }, []);
 
-  // Auto-refresh interval
-  useEffect(() => {
-    const interval = setInterval(
-      loadTodayPasses,
-      REFRESH_INTERVALS.TODAY_PASSES
-    );
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadTodayPasses = async () => {
+  // ===== fetch: OUT today (active) + IN today (history) + OUT today (history created today) =====
+  const fetchTodayPasses = async () => {
     setLoading(true);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Date-only constraints; room/destination filters happen client-side
+    const qActive = query(
+      collection(db, COLLECTIONS.ACTIVE_PASSES),
+      where("status", "==", "OUT"),
+      where("checkOutTime", ">=", Timestamp.fromDate(todayStart)),
+      orderBy("checkOutTime", "desc")
+    );
+
+    const qHistIn = query(
+      collection(db, COLLECTIONS.PASS_HISTORY),
+      where("checkInTime", ">=", Timestamp.fromDate(todayStart)),
+      orderBy("checkInTime", "desc")
+    );
+
+    const qHistOutToday = query(
+      collection(db, COLLECTIONS.PASS_HISTORY),
+      where("createdAt", ">=", Timestamp.fromDate(todayStart)),
+      orderBy("createdAt", "desc")
+    );
+
     try {
-      const result = await api.getTodayPasses({
-        roomFrom: filterRoom,
-        destination: filterDestination,
-        searchTerm: searchTerm,
+      const [snapA, snapHIn, snapHOutToday] = await Promise.all([
+        getDocs(qActive),
+        getDocs(qHistIn),
+        getDocs(qHistOutToday),
+      ]);
+
+      const rows = [];
+      const toRow = (d, source) => {
+        const x = d.data();
+        return {
+          id: d.id,
+          source, // "active" | "history"
+          ...x,
+          _checkOutISO: x.checkOutTime?.toDate()?.toISOString() || null,
+          _checkInISO: x.checkInTime?.toDate()?.toISOString() || null,
+          _createdISO: x.createdAt?.toDate()?.toISOString() || null,
+        };
+      };
+
+      // Build rows
+      snapA.docs.forEach((d) => rows.push(toRow(d, "active")));
+      snapHIn.docs.forEach((d) => rows.push(toRow(d, "history"))); // ← unify as "history"
+      snapHOutToday.docs.forEach((d) => rows.push(toRow(d, "history"))); // ← unify as "history"
+
+      // De-dupe by collection + id (so the same history doc from two queries keeps only one)
+      const byKey = new Map();
+      for (const r of rows) {
+        const key = `${r.source}:${r.id}`; // "active:docId" or "history:docId"
+        if (!byKey.has(key)) byKey.set(key, r);
+      }
+
+      const merged = Array.from(byKey.values()).sort((a, b) => {
+        const ta = new Date(
+          a._checkInISO || a._createdISO || a._checkOutISO || 0
+        ).getTime();
+        const tb = new Date(
+          b._checkInISO || b._createdISO || b._checkOutISO || 0
+        ).getTime();
+        return tb - ta;
       });
 
-      if (result.success) {
-        setTodayPasses(result.passes || []);
-        setLastUpdate(new Date());
-      }
-    } catch (error) {
-      console.error("Error loading today's passes:", error);
+      setPasses(merged);
+    } catch (e) {
+      console.error("fetchTodayPasses error:", e);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadRooms = async () => {
-    try {
-      const result = await api.getRoomList();
-      if (result.success) {
-        setRooms(result.rooms || []);
-      }
-    } catch (error) {
-      console.error("Error loading rooms:", error);
-    }
-  };
+  useEffect(() => {
+    fetchTodayPasses();
+  }, []); // initial load
 
-  const loadDestinations = async () => {
-    try {
-      const result = await api.getDestinationList();
-      if (result.success) {
-        setDestinations(result.destinations || []);
-      }
-    } catch (error) {
-      console.error("Error loading destinations:", error);
-    }
-  };
+  // ===== client-side filters: search + room + destination =====
+  const filtered = useMemo(() => {
+    const q = norm(search);
+    const r = norm(filterRoom);
+    const d = norm(filterDestination);
 
-  const handleEditPass = async (updatedData) => {
-    try {
-      const result = await api.updateArchivedPass(
-        updatedData.passId,
-        updatedData.studentId,
-        updatedData.studentName,
-        updatedData.roomFrom,
-        updatedData.destination,
-        updatedData.checkOutTime,
-        updatedData.checkInTime
-      );
-
-      if (result.success) {
-        await loadTodayPasses();
-        setEditingPass(null);
-      } else {
-        alert("Error updating pass: " + (result.error || "Unknown error"));
-      }
-    } catch (error) {
-      console.error("Error updating pass:", error);
-      alert("Error updating pass. Please try again.");
-    }
-  };
-
-  // Memoized filtered passes for performance
-  const filteredPasses = useMemo(() => {
-    return todayPasses.filter((pass) => {
+    return passes.filter((p) => {
       const matchesSearch =
-        searchTerm === "" ||
-        pass.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(pass.studentId).includes(searchTerm);
+        !q ||
+        norm(p.studentName).includes(q) ||
+        norm(p.studentId).includes(q) ||
+        norm(p.destination).includes(q);
 
-      const matchesRoom =
-        filterRoom === "" || String(pass.roomFrom) === filterRoom;
+      const matchesRoom = !r || norm(p.roomFrom) === r;
+      const matchesDest = !d || norm(p.destination) === d;
 
-      const matchesDestination =
-        filterDestination === "" || pass.destination === filterDestination;
-
-      return matchesSearch && matchesRoom && matchesDestination;
+      return matchesSearch && matchesRoom && matchesDest;
     });
-  }, [todayPasses, searchTerm, filterRoom, filterDestination]);
+  }, [search, filterRoom, filterDestination, passes]);
 
-  const activePasses = filteredPasses.filter((p) => p.status === "OUT");
-  const checkedInPasses = filteredPasses.filter((p) => p.status === "IN");
+  // ===== save edits to correct collection =====
+  const handleSaveEdit = async (edited) => {
+    try {
+      const {
+        id,
+        source, // 'active' or 'history'
+        studentName,
+        studentId,
+        destination,
+        roomFrom,
+        checkOutTime,
+        checkInTime,
+      } = edited;
 
+      const col =
+        source === "active"
+          ? COLLECTIONS.ACTIVE_PASSES
+          : COLLECTIONS.PASS_HISTORY;
+      const ref = doc(db, col, id);
+
+      const toTimestamp = (v) => {
+        if (!v) return null;
+        const d = typeof v === "string" ? new Date(v) : v;
+        return isNaN(d.getTime()) ? null : Timestamp.fromDate(d);
+      };
+
+      const patch = {
+        studentName: studentName ?? null,
+        studentId: studentId ?? null,
+        destination: destination ?? null,
+        roomFrom: roomFrom != null ? String(roomFrom) : null,
+      };
+
+      const co = toTimestamp(checkOutTime);
+      const ci = toTimestamp(checkInTime);
+      if (co) patch.checkOutTime = co;
+      if (ci) patch.checkInTime = ci;
+
+      await updateDoc(ref, patch);
+      setEditingPass(null);
+      fetchTodayPasses();
+    } catch (err) {
+      console.error("Edit save error:", err);
+      alert("Unable to save edits. Check console for details.");
+    }
+  };
+
+  // ===== check-in handler for OUT rows (same as Active behavior) =====
+  const handleCheckIn = async (row) => {
+    try {
+      await checkInPass(row.id);
+      fetchTodayPasses();
+    } catch (err) {
+      console.error("Check-in error:", err);
+      alert("Unable to check in. Check console for details.");
+    }
+  };
+
+  // ===== UI (Active-style controls & compact cards) =====
   return (
-    <>
-      <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="relative">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              size={20}
-            />
-            <input
-              type="text"
-              placeholder="Search by name or ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            />
-          </div>
+    <div className="bg-white rounded-lg shadow-sm border p-6">
+      {/* FILTERS — Active-style */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+        {/* Search */}
+        <div className="relative">
+          <Search
+            size={18}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            className="w-full h-12 rounded-2xl border border-gray-200 bg-white pl-11 pr-4 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 placeholder:text-gray-400"
+            placeholder="Search by name or ID..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
 
+        {/* Room */}
+        <div className="relative">
           <select
+            className="w-full h-12 appearance-none rounded-2xl border border-gray-200 bg-white px-4 pr-10 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             value={filterRoom}
             onChange={(e) => setFilterRoom(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="">All Rooms</option>
-            {rooms.map((room) => (
-              <option key={room} value={room}>
-                {/^\d+$/.test(room) ? `Room ${room}` : room}
+            {allRooms.map((r) => (
+              <option key={r} value={r}>
+                {r}
               </option>
             ))}
           </select>
+          <svg
+            className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400"
+            width="18"
+            height="18"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+          >
+            <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
+          </svg>
+        </div>
 
-          <select
+        {/* Destination */}
+        <div className="relative">
+          <MapPin
+            size={18}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            className="w-full h-12 rounded-2xl border border-gray-200 bg-white pl-11 pr-4 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 placeholder:text-gray-400"
+            placeholder="Filter by destination..."
             value={filterDestination}
             onChange={(e) => setFilterDestination(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 capitalize"
-          >
-            <option value="">All Destinations</option>
-            {destinations.map((dest) => (
-              <option
-                key={dest}
-                value={dest.toLowerCase()}
-                className="capitalize"
-              >
-                {dest}
-              </option>
+            list="destinations-today"
+          />
+          <datalist id="destinations-today">
+            {allDestinations.map((d) => (
+              <option key={d} value={d} />
             ))}
-          </select>
+          </datalist>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Total Today</p>
-              <p className="text-3xl font-bold text-gray-900">
-                {filteredPasses.length}
-              </p>
-            </div>
-            <div className="bg-blue-100 p-3 rounded-full">
-              <Clock size={24} className="text-blue-600" />
-            </div>
-          </div>
-        </div>
+      {loading && <p className="p-8 text-center">Loading…</p>}
+      {!loading && filtered.length === 0 && (
+        <p className="p-8 text-center">No passes found for today.</p>
+      )}
 
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Currently Out</p>
-              <p className="text-3xl font-bold text-orange-600">
-                {activePasses.length}
-              </p>
-            </div>
-            <div className="bg-orange-100 p-3 rounded-full">
-              <User size={24} className="text-orange-600" />
-            </div>
-          </div>
-        </div>
+      {/* CARDS — compact: left (name/ID) | middle (from-to + Out/In/Duration) | right (Edit then action) */}
+      {!loading && filtered.length > 0 && (
+        <div className="space-y-3">
+          {filtered.map((p) => {
+            const isOut = p.source === "active";
+            const outIso = p._checkOutISO;
+            const inIso = p._checkInISO;
+            const duration = fmtDuration(outIso, inIso);
 
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Checked In</p>
-              <p className="text-3xl font-bold text-green-600">
-                {checkedInPasses.length}
-              </p>
-            </div>
-            <div className="bg-green-100 p-3 rounded-full">
-              <CheckCircle size={24} className="text-green-600" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow-sm">
-        <div className="px-6 py-4 border-b flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-800">
-            All Passes Today ({filteredPasses.length})
-          </h2>
-          {lastUpdate && (
-            <p className="text-xs text-gray-500">
-              Last updated: {lastUpdate.toLocaleTimeString()}
-            </p>
-          )}
-        </div>
-
-        {loading && todayPasses.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <RefreshCw className="animate-spin mx-auto mb-2" size={24} />
-            Loading today's passes...
-          </div>
-        ) : filteredPasses.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <Clock className="mx-auto mb-2 text-gray-400" size={48} />
-            <p className="font-medium">No passes found for today</p>
-            <p className="text-sm mt-1">No students have checked out yet</p>
-          </div>
-        ) : (
-          <div className="divide-y max-h-[600px] overflow-y-auto">
-            {filteredPasses.map((pass) => (
+            return (
               <div
-                key={pass.id}
-                className={`p-4 transition-colors ${
-                  pass.status === "OUT" ? "bg-orange-50" : "hover:bg-gray-50"
-                }`}
+                key={`${p.source}:${p.id}`}
+                className="bg-white border border-gray-200 rounded-2xl px-4 py-4 md:px-5 md:py-5 hover:shadow-sm"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm ${
-                          pass.status === "OUT"
-                            ? "bg-orange-100 text-orange-700"
-                            : "bg-green-100 text-green-700"
-                        }`}
-                      >
-                        {pass.studentName
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")}
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-800">
-                          {pass.studentName}
-                        </h3>
-                        <p className="text-sm text-gray-600">
-                          ID: {pass.studentId}
-                        </p>
-                      </div>
+                <div className="flex items-center gap-4">
+                  {/* LEFT: avatar + name/ID */}
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
+                      <User size={22} className="text-indigo-600" />
                     </div>
-
-                    <div className="flex flex-wrap gap-4 text-sm ml-13">
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <MapPin size={16} className="text-gray-400" />
-                        <span>From Room {pass.roomFrom}</span>
+                    <div className="min-w-0">
+                      <div className="text-lg font-semibold text-gray-800 truncate">
+                        {p.studentName}
                       </div>
-                      <div className="flex items-center gap-1 text-indigo-600">
-                        <MapPin size={16} className="text-indigo-500" />
-                        <span className="capitalize">
-                          To {pass.destination}
-                        </span>
+                      <div className="text-sm text-gray-500 truncate">
+                        ID: {p.studentId}
                       </div>
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <Clock size={16} />
-                        <span>Out: {formatTime(pass.checkOutTime)}</span>
-                      </div>
-                      {pass.checkInTime && (
-                        <div className="flex items-center gap-1 text-green-600">
-                          <CheckCircle size={16} />
-                          <span>
-                            In: {formatTime(pass.checkInTime)} ({pass.duration}{" "}
-                            min)
-                          </span>
-                        </div>
-                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  {/* MIDDLE: From/To + one-line Out/In/Duration */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 text-gray-700 truncate">
+                      <MapPin size={16} className="text-blue-500 shrink-0" />
+                      <span className="truncate">
+                        From{" "}
+                        <span className="font-semibold">Room {p.roomFrom}</span>{" "}
+                        to{" "}
+                        <span className="font-semibold capitalize">
+                          {p.destination}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-gray-600 flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <span>
+                        <span className="text-gray-500">Out:</span>{" "}
+                        {fmtTime(outIso)}
+                      </span>
+                      <span>
+                        <span className="text-gray-500">In:</span>{" "}
+                        {fmtTime(inIso)}
+                      </span>
+                      <span>
+                        <span className="text-gray-500">Duration:</span>{" "}
+                        {duration}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* RIGHT: Edit then Check In / Checked in */}
+                  <div className="flex items-center gap-3 shrink-0">
                     <button
-                      onClick={() => setEditingPass(pass)}
-                      className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors flex items-center gap-2"
+                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-sm shadow-sm hover:bg-blue-700"
+                      onClick={() =>
+                        setEditingPass({
+                          id: p.id,
+                          source: isOut ? "active" : "history",
+                          studentName: p.studentName || "",
+                          studentId: p.studentId || "",
+                          destination: p.destination || "",
+                          roomFrom: p.roomFrom || "",
+                          checkOutTime: p._checkOutISO || "",
+                          checkInTime: p._checkInISO || "",
+                        })
+                      }
                     >
-                      <User size={16} />
+                      <Edit size={16} />
                       Edit
                     </button>
 
-                    <div
-                      className={`px-4 py-2 rounded-lg font-medium ${
-                        pass.status === "OUT"
-                          ? "bg-orange-100 text-orange-700"
-                          : "bg-green-100 text-green-700"
-                      }`}
-                    >
-                      {pass.status === "OUT" ? "Currently Out" : "Checked In"}
-                    </div>
+                    {isOut ? (
+                      <button
+                        className="inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-green-600 text-white shadow-sm hover:bg-green-700"
+                        onClick={() => handleCheckIn(p)}
+                      >
+                        <CheckCircle size={18} />
+                        Check In
+                      </button>
+                    ) : (
+                      <StatusPill isOut={false} />
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {editingPass && (
         <EditPassDialog
           pass={editingPass}
           onClose={() => setEditingPass(null)}
-          onSave={handleEditPass}
+          onSave={handleSaveEdit}
         />
       )}
-    </>
+    </div>
   );
 };
 
-// Analytics Component
-// Analytics Component
-const AnalyticsView = ({ api }) => {
+// --- AnalyticsView (Firestore-driven) ---
+const AnalyticsView = () => {
   const [analytics, setAnalytics] = useState(null);
   const [monthlyThreshold, setMonthlyThreshold] = useState(10);
   const [dailyThreshold, setDailyThreshold] = useState(3);
   const [loading, setLoading] = useState(false);
   const [days, setDays] = useState(30);
 
-  // Student Lookup states
+  // Student Lookup
   const [studentSearch, setStudentSearch] = useState("");
   const [studentResult, setStudentResult] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -590,146 +623,262 @@ const AnalyticsView = ({ api }) => {
     loadAnalytics();
   }, [days]);
 
+  // Helpers
+  const startOfToday = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+  const periodStart = (nDays) => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - (nDays - 1)); // inclusive of today
+    return d;
+  };
+  const norm = (v) => String(v ?? "").trim().toLowerCase();
+
+  const asRow = (docSnap, source) => {
+    const x = docSnap.data();
+    const outISO = x.checkOutTime?.toDate()?.toISOString() || null;
+    const inISO = x.checkInTime?.toDate()?.toISOString() || null;
+    const createdISO = x.createdAt?.toDate()?.toISOString() || null;
+
+    let duration = null;
+    if (outISO && inISO) {
+      const mins = Math.round((new Date(inISO) - new Date(outISO)) / 60000);
+      duration = mins >= 0 ? mins : null;
+    }
+
+    return {
+      id: docSnap.id,
+      source, // 'active' | 'history'
+      studentId: x.studentId != null ? String(x.studentId) : "",
+      name: x.studentName || "",
+      roomFrom: x.roomFrom != null ? String(x.roomFrom) : "",
+      destination: x.destination || "",
+      createdAtISO: createdISO,
+      checkOutISO: outISO,
+      checkInISO: inISO,
+      duration, // minutes
+      status: source === "active" ? "OUT" : (x.status || "IN").toUpperCase(),
+    };
+  };
+
+  // Load all analytics for period + today
   const loadAnalytics = async () => {
     setLoading(true);
     try {
-      const data = await api.getAnalytics(days);
-      if (data.success) {
-        setAnalytics(data);
+      const since = periodStart(days);
+      const todayStart = startOfToday();
+
+      const qActivePeriod = query(
+        collection(db, COLLECTIONS.ACTIVE_PASSES),
+        where("status", "==", "OUT"),
+        where("checkOutTime", ">=", Timestamp.fromDate(since)),
+        orderBy("checkOutTime", "desc")
+      );
+
+      const qHistInPeriod = query(
+        collection(db, COLLECTIONS.PASS_HISTORY),
+        where("checkInTime", ">=", Timestamp.fromDate(since)),
+        orderBy("checkInTime", "desc")
+      );
+
+      const qHistOutPeriod = query(
+        collection(db, COLLECTIONS.PASS_HISTORY),
+        where("createdAt", ">=", Timestamp.fromDate(since)),
+        orderBy("createdAt", "desc")
+      );
+
+      const qActiveToday = query(
+        collection(db, COLLECTIONS.ACTIVE_PASSES),
+        where("status", "==", "OUT"),
+        where("checkOutTime", ">=", Timestamp.fromDate(todayStart)),
+        orderBy("checkOutTime", "desc")
+      );
+
+      const qHistOutToday = query(
+        collection(db, COLLECTIONS.PASS_HISTORY),
+        where("createdAt", ">=", Timestamp.fromDate(todayStart)),
+        orderBy("createdAt", "desc")
+      );
+
+      const [
+        snapActivePeriod,
+        snapHistInPeriod,
+        snapHistOutPeriod,
+        snapActiveToday,
+        snapHistOutToday
+      ] = await Promise.all([
+        getDocs(qActivePeriod),
+        getDocs(qHistInPeriod),
+        getDocs(qHistOutPeriod),
+        getDocs(qActiveToday),
+        getDocs(qHistOutToday)
+      ]);
+
+      // Period rows
+      const rowsPeriod = [];
+      snapActivePeriod.docs.forEach(d => rowsPeriod.push(asRow(d, "active")));
+      const histMap = new Map();
+      snapHistInPeriod.docs.forEach(d => histMap.set(d.id, asRow(d, "history")));
+      snapHistOutPeriod.docs.forEach(d => {
+        if (!histMap.has(d.id)) histMap.set(d.id, asRow(d, "history"));
+      });
+      rowsPeriod.push(...histMap.values());
+
+      // Frequent users (count passes STARTED in period)
+      const startedInPeriod = rowsPeriod.filter(r => r.checkOutISO || r.createdAtISO);
+      const byStudent = new Map();
+      for (const r of startedInPeriod) {
+        const key = r.studentId || r.name;
+        if (!key) continue;
+        const prev = byStudent.get(key) || { studentId: r.studentId, name: r.name, count: 0 };
+        prev.count += 1;
+        byStudent.set(key, prev);
       }
-    } catch (error) {
-      console.error("Error loading analytics:", error);
+      const frequentUsers = Array.from(byStudent.values()).sort((a,b) => b.count - a.count);
+
+      // Daily multiple (count passes STARTED today)
+      const todayRows = [];
+      snapActiveToday.docs.forEach(d => todayRows.push(asRow(d, "active")));
+      snapHistOutToday.docs.forEach(d => todayRows.push(asRow(d, "history")));
+      const byStudentToday = new Map();
+      for (const r of todayRows) {
+        const key = r.studentId || r.name;
+        if (!key) continue;
+        const prev = byStudentToday.get(key) || { studentId: r.studentId, name: r.name, count: 0 };
+        prev.count += 1;
+        byStudentToday.set(key, prev);
+      }
+      const dailyMultiple = Array.from(byStudentToday.values()).sort((a,b) => b.count - a.count);
+
+      setAnalytics({ frequentUsers, dailyMultiple, periodDays: days });
+    } catch (err) {
+      console.error("Error loading analytics:", err);
+      setAnalytics(null);
     } finally {
       setLoading(false);
     }
   };
 
+  // Student lookup
   const handleStudentSearch = async () => {
     if (!studentSearch.trim()) {
       setStudentResult(null);
       return;
     }
-
     setSearchLoading(true);
     setStudentResult(null);
 
     try {
-      // Search in analytics data for matching student
       if (!analytics) {
         setSearchLoading(false);
         return;
       }
+      const term = norm(studentSearch);
+      const frequent = analytics.frequentUsers || [];
+      const found =
+        frequent.find(u => String(u.studentId).toLowerCase().includes(term)) ||
+        frequent.find(u => norm(u.name).includes(term));
 
-      const searchLower = studentSearch.toLowerCase().trim();
-
-      // Find in frequent users (monthly data)
-      const foundStudent = analytics.frequentUsers.find(
-        (user) =>
-          user.studentId.toString().includes(searchLower) ||
-          user.name.toLowerCase().includes(searchLower)
-      );
-
-      if (foundStudent) {
-        // Calculate additional stats
-        const dailyEntry = analytics.dailyMultiple.find(
-          (u) => u.studentId === foundStudent.studentId
-        );
-
-        setStudentResult({
-          found: true,
-          studentId: foundStudent.studentId,
-          name: foundStudent.name,
-          totalPasses: foundStudent.count,
-          todayPasses: dailyEntry ? dailyEntry.count : 0,
-          period: days,
-        });
-      } else {
-        // Student not found in analytics
-        setStudentResult({
-          found: false,
-          searchTerm: studentSearch,
-        });
+      let todayCount = 0;
+      if (found && analytics.dailyMultiple) {
+        const d = analytics.dailyMultiple.find(u => u.studentId === found.studentId);
+        todayCount = d ? d.count : 0;
       }
-    } catch (error) {
-      console.error("Error searching student:", error);
+
+      setStudentResult(
+        found
+          ? {
+              found: true,
+              studentId: found.studentId,
+              name: found.name,
+              totalPasses: found.count,
+              todayPasses: todayCount,
+              period: days
+            }
+          : { found: false, searchTerm: studentSearch }
+      );
+    } catch (err) {
+      console.error("Error searching student:", err);
     } finally {
       setSearchLoading(false);
     }
   };
 
   const loadStudentDetails = async (studentId) => {
-    // Toggle visibility if already loaded
-    if (studentResult.detailsVisible) {
-      setStudentResult({
-        ...studentResult,
-        detailsVisible: false,
-      });
+    if (!studentId) return;
+
+    if (studentResult?.detailsVisible) {
+      setStudentResult(prev => ({ ...prev, detailsVisible: false }));
       return;
     }
 
-    // Show loading state
-    setStudentResult({
-      ...studentResult,
-      loadingDetails: true,
-    });
+    setStudentResult(prev => ({ ...prev, loadingDetails: true }));
 
     try {
-      // Get detailed pass history from backend
-      const result = await api.getStudentDetailedReport(studentId, days);
+      const since = periodStart(days);
 
-      if (result.success && result.passes) {
-        setStudentResult({
-          ...studentResult,
-          loadingDetails: false,
-          detailsVisible: true,
-          passHistory: result.passes.map((pass) => ({
-            date: pass.date,
-            roomFrom: pass.roomFrom,
-            destination: pass.destination,
-            checkOutTime: new Date(pass.date).toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-              hour12: true,
-            }),
-            checkInTime: pass.checkInBy
-              ? new Date(pass.date).toLocaleTimeString("en-US", {
-                  hour: "numeric",
-                  minute: "2-digit",
-                  hour12: true,
-                })
-              : null,
-            duration: pass.duration,
-            status: pass.checkInBy ? "IN" : "OUT",
-          })),
-        });
-      } else {
-        setStudentResult({
-          ...studentResult,
-          loadingDetails: false,
-          detailsVisible: true,
-          passHistory: [],
-        });
-      }
-    } catch (error) {
-      console.error("Error loading student details:", error);
-      setStudentResult({
-        ...studentResult,
-        loadingDetails: false,
+      const qActive = query(
+        collection(db, COLLECTIONS.ACTIVE_PASSES),
+        where("studentId", "==", studentId),
+        where("checkOutTime", ">=", Timestamp.fromDate(since)),
+        orderBy("checkOutTime", "desc")
+      );
+      const qHistCreated = query(
+        collection(db, COLLECTIONS.PASS_HISTORY),
+        where("studentId", "==", studentId),
+        where("createdAt", ">=", Timestamp.fromDate(since)),
+        orderBy("createdAt", "desc")
+      );
+
+      const [snapA, snapH] = await Promise.all([getDocs(qActive), getDocs(qHistCreated)]);
+      const rows = [];
+      snapA.docs.forEach(d => rows.push(asRow(d, "active")));
+      snapH.docs.forEach(d => rows.push(asRow(d, "history")));
+
+      rows.sort((a,b) => {
+        const ta = new Date(a.checkInISO || a.createdAtISO || a.checkOutISO || 0).getTime();
+        const tb = new Date(b.checkInISO || b.createdAtISO || b.checkOutISO || 0).getTime();
+        return tb - ta;
       });
+
+      const passHistory = rows.map(r => ({
+        date: r.createdAtISO || r.checkOutISO || r.checkInISO,
+        roomFrom: r.roomFrom,
+        destination: r.destination,
+        checkOutTime: r.checkOutISO
+          ? new Date(r.checkOutISO).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+          : "—",
+        checkInTime: r.checkInISO
+          ? new Date(r.checkInISO).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+          : null,
+        duration: r.duration,
+        status: r.status,
+      }));
+
+      setStudentResult(prev => ({
+        ...prev,
+        loadingDetails: false,
+        detailsVisible: true,
+        passHistory
+      }));
+    } catch (err) {
+      console.error("Error loading student details:", err);
+      setStudentResult(prev => ({ ...prev, loadingDetails: false }));
     }
   };
 
   const handleSearchKeyPress = (e) => {
-    if (e.key === "Enter") {
-      handleStudentSearch();
-    }
+    if (e.key === "Enter") handleStudentSearch();
   };
-
   const clearSearch = () => {
     setStudentSearch("");
     setStudentResult(null);
   };
 
+  // UI
   if (loading || !analytics) {
     return (
       <div className="text-center py-8">
@@ -741,18 +890,13 @@ const AnalyticsView = ({ api }) => {
 
   return (
     <div className="space-y-6">
-      {/* STUDENT LOOKUP SECTION */}
+      {/* STUDENT LOOKUP */}
       <div className="bg-white rounded-lg shadow-sm p-6 border-2 border-indigo-100">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Student Lookup
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Student Lookup</h2>
 
         <div className="flex gap-3 mb-4">
           <div className="flex-1 relative">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              size={20}
-            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             <input
               type="text"
               value={studentSearch}
@@ -790,13 +934,12 @@ const AnalyticsView = ({ api }) => {
             </button>
           )}
         </div>
+
         {/* Search Results */}
         {studentResult && (
           <div
             className={`p-4 rounded-lg border-2 ${
-              studentResult.found
-                ? "bg-blue-50 border-blue-200"
-                : "bg-yellow-50 border-yellow-200"
+              studentResult.found ? "bg-blue-50 border-blue-200" : "bg-yellow-50 border-yellow-200"
             }`}
           >
             {studentResult.found ? (
@@ -804,46 +947,31 @@ const AnalyticsView = ({ api }) => {
                 <div className="flex items-center gap-3 mb-3">
                   <User size={24} className="text-indigo-600" />
                   <div>
-                    <h3 className="font-bold text-gray-900 text-lg">
-                      {studentResult.name}
-                    </h3>
-                    <p className="text-sm text-gray-600">
-                      ID: {studentResult.studentId}
-                    </p>
+                    <h3 className="font-bold text-gray-900 text-lg">{studentResult.name}</h3>
+                    <p className="text-sm text-gray-600">ID: {studentResult.studentId}</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4 mt-4">
                   <div className="bg-white p-3 rounded-lg">
-                    <p className="text-xs text-gray-600 mb-1">
-                      Last {studentResult.period} Days
-                    </p>
-                    <p className="text-2xl font-bold text-indigo-600">
-                      {studentResult.totalPasses}
-                    </p>
+                    <p className="text-xs text-gray-600 mb-1">Last {studentResult.period} Days</p>
+                    <p className="text-2xl font-bold text-indigo-600">{studentResult.totalPasses}</p>
                     <p className="text-xs text-gray-600">total passes</p>
                   </div>
-
                   <div className="bg-white p-3 rounded-lg">
                     <p className="text-xs text-gray-600 mb-1">Today</p>
-                    <p className="text-2xl font-bold text-orange-600">
-                      {studentResult.todayPasses}
-                    </p>
+                    <p className="text-2xl font-bold text-orange-600">{studentResult.todayPasses}</p>
                     <p className="text-xs text-gray-600">passes</p>
                   </div>
-
                   <div className="bg-white p-3 rounded-lg">
                     <p className="text-xs text-gray-600 mb-1">Daily Avg</p>
                     <p className="text-2xl font-bold text-green-600">
-                      {(
-                        studentResult.totalPasses / studentResult.period
-                      ).toFixed(1)}
+                      {(studentResult.totalPasses / studentResult.period).toFixed(1)}
                     </p>
                     <p className="text-xs text-gray-600">per day</p>
                   </div>
                 </div>
 
-                {/* View Details Button */}
                 <div className="mt-4 flex justify-center">
                   <button
                     onClick={() => loadStudentDetails(studentResult.studentId)}
@@ -869,7 +997,6 @@ const AnalyticsView = ({ api }) => {
                   </button>
                 </div>
 
-                {/* Detailed Pass History */}
                 {studentResult.detailsVisible && studentResult.passHistory && (
                   <div className="mt-4 border-t-2 border-indigo-200 pt-4">
                     <h4 className="font-semibold text-gray-800 mb-3">
@@ -877,63 +1004,38 @@ const AnalyticsView = ({ api }) => {
                     </h4>
 
                     {studentResult.passHistory.length === 0 ? (
-                      <p className="text-gray-500 text-sm">
-                        No pass history found
-                      </p>
+                      <p className="text-gray-500 text-sm">No pass history found</p>
                     ) : (
                       <div className="space-y-2 max-h-96 overflow-y-auto">
                         {studentResult.passHistory.map((pass, index) => (
-                          <div
-                            key={index}
-                            className="bg-white p-3 rounded-lg border border-gray-200 text-sm"
-                          >
+                          <div key={index} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
                             <div className="flex items-center justify-between mb-2">
                               <span className="font-medium text-gray-900">
-                                {new Date(pass.date).toLocaleDateString(
-                                  "en-US",
-                                  {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "numeric",
-                                  }
-                                )}
+                                {new Date(pass.date).toLocaleDateString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })}
                               </span>
                               <span
                                 className={`px-2 py-1 rounded text-xs font-medium ${
-                                  pass.status === "OUT"
-                                    ? "bg-orange-100 text-orange-700"
-                                    : "bg-green-100 text-green-700"
+                                  pass.status === "OUT" ? "bg-orange-100 text-orange-700" : "bg-green-100 text-green-700"
                                 }`}
                               >
-                                {pass.status === "OUT"
-                                  ? "Currently Out"
-                                  : "Completed"}
+                                {pass.status === "OUT" ? "Currently Out" : "Completed"}
                               </span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                              <div>
-                                <span className="font-medium">From:</span> Room{" "}
-                                {pass.roomFrom}
-                              </div>
-                              <div>
-                                <span className="font-medium">To:</span>{" "}
-                                {pass.destination}
-                              </div>
-                              <div>
-                                <span className="font-medium">Out:</span>{" "}
-                                {pass.checkOutTime}
-                              </div>
+                              <div><span className="font-medium">From:</span> Room {pass.roomFrom}</div>
+                              <div><span className="font-medium">To:</span> {pass.destination}</div>
+                              <div><span className="font-medium">Out:</span> {pass.checkOutTime}</div>
                               {pass.checkInTime && (
-                                <div>
-                                  <span className="font-medium">In:</span>{" "}
-                                  {pass.checkInTime}
-                                </div>
+                                <div><span className="font-medium">In:</span> {pass.checkInTime}</div>
                               )}
-                              {pass.duration && (
+                              {pass.duration != null && (
                                 <div className="col-span-2">
-                                  <span className="font-medium">Duration:</span>{" "}
-                                  {pass.duration} minutes
+                                  <span className="font-medium">Duration:</span> {pass.duration} minutes
                                 </div>
                               )}
                             </div>
@@ -948,8 +1050,7 @@ const AnalyticsView = ({ api }) => {
               <div className="flex items-center gap-3">
                 <AlertCircle size={20} className="text-yellow-600" />
                 <p className="text-sm text-gray-700">
-                  No student found matching "{studentResult.searchTerm}" in the
-                  last {days} days.
+                  No student found matching "{studentResult.searchTerm}" in the last {days} days.
                 </p>
               </div>
             )}
@@ -957,20 +1058,16 @@ const AnalyticsView = ({ api }) => {
         )}
       </div>
 
-      {/* EXISTING ANALYTICS SECTIONS */}
+      {/* PERIOD PICKER */}
       <div className="bg-white rounded-lg shadow-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Time Period
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Time Period</h2>
         <div className="flex gap-2">
           {[7, 14, 30, 60, 90].map((d) => (
             <button
               key={d}
               onClick={() => setDays(d)}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                days === d
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                days === d ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
               {d} days
@@ -979,10 +1076,9 @@ const AnalyticsView = ({ api }) => {
         </div>
       </div>
 
+      {/* THRESHOLDS */}
       <div className="bg-white rounded-lg shadow-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Filter Thresholds
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Filter Thresholds</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1015,33 +1111,28 @@ const AnalyticsView = ({ api }) => {
         </div>
       </div>
 
+      {/* FREQUENT USERS */}
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Students with {monthlyThreshold}+ Passes (Last {days} Days)
+          Students with {monthlyThreshold}+ Passes (Last {analytics.periodDays} Days)
         </h2>
-        {analytics.frequentUsers.filter((u) => u.count >= monthlyThreshold)
-          .length === 0 ? (
+        {analytics.frequentUsers.filter((u) => u.count >= monthlyThreshold).length === 0 ? (
           <p className="text-gray-500">No students meet this threshold</p>
         ) : (
           <div className="space-y-3">
             {analytics.frequentUsers
               .filter((u) => u.count >= monthlyThreshold)
               .map((user) => (
-                <div
-                  key={user.studentId}
-                  className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg"
-                >
+                <div key={user.studentId} className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
                   <div className="flex items-center gap-3">
                     <User size={20} className="text-yellow-600" />
                     <div>
                       <p className="font-medium text-gray-800">{user.name}</p>
-                      <p className="text-sm text-gray-600">
-                        ID: {user.studentId}
-                      </p>
+                      <p className="text-sm text-gray-600">ID: {user.studentId}</p>
                     </div>
                   </div>
                   <span className="text-lg font-semibold text-yellow-700">
-                    {user.count} passes
+                    {user.count} {user.count === 1 ? "pass" : "passes"}
                   </span>
                 </div>
               ))}
@@ -1049,33 +1140,28 @@ const AnalyticsView = ({ api }) => {
         )}
       </div>
 
+      {/* DAILY MULTIPLE */}
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
           Students with {dailyThreshold}+ Passes Today
         </h2>
-        {analytics.dailyMultiple.filter((u) => u.count >= dailyThreshold)
-          .length === 0 ? (
+        {analytics.dailyMultiple.filter((u) => u.count >= dailyThreshold).length === 0 ? (
           <p className="text-gray-500">No students meet this threshold today</p>
         ) : (
           <div className="space-y-3">
             {analytics.dailyMultiple
               .filter((u) => u.count >= dailyThreshold)
               .map((user) => (
-                <div
-                  key={user.studentId}
-                  className="flex items-center justify-between p-3 bg-red-50 rounded-lg"
-                >
+                <div key={user.studentId} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
                   <div className="flex items-center gap-3">
                     <AlertCircle size={20} className="text-red-600" />
                     <div>
                       <p className="font-medium text-gray-800">{user.name}</p>
-                      <p className="text-sm text-gray-600">
-                        ID: {user.studentId}
-                      </p>
+                      <p className="text-sm text-gray-600">ID: {user.studentId}</p>
                     </div>
                   </div>
                   <span className="text-lg font-semibold text-red-700">
-                    {user.count} passes today
+                    {user.count} {user.count === 1 ? "pass" : "passes"} today
                   </span>
                 </div>
               ))}
@@ -1086,205 +1172,171 @@ const AnalyticsView = ({ api }) => {
   );
 };
 
-// Main Dashboard Component
-const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
+// --- Main Dashboard Component ---
+const Dashboard = () => {
+  const { user } = useAuth();
+  const userRole = user?.role;
+  const userRoom = user?.room;
+
   const [activePasses, setActivePasses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [view, setView] = useState("active");
+  const [isTabVisible, setIsTabVisible] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterRoom, setFilterRoom] = useState("");
   const [filterDestination, setFilterDestination] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [view, setView] = useState("active");
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [rooms, setRooms] = useState([]);
-  const [destinations, setDestinations] = useState([]);
-  const [isTabVisible, setIsTabVisible] = useState(true);
-  const [checkingIn, setCheckingIn] = useState(new Set()); // Track which passes are being checked in
+  const [allRooms, setAllRooms] = useState([]);
 
   useEffect(() => {
-    if (userRole === "teacher" && userRoom) {
-      setFilterRoom(String(userRoom));
-    } else {
-      setFilterRoom("");
-    }
-  }, [userRole, userRoom]);
-
-  // Load data when filters change
-  useEffect(() => {
-    loadActivePasses();
-  }, [filterRoom, filterDestination, searchTerm]);
-
-  // Load rooms and destinations once
-  useEffect(() => {
-    loadRooms();
-    loadDestinations();
-  }, []);
-
-  // Visibility change handler - refresh when tab becomes visible
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      const visible = !document.hidden;
-      setIsTabVisible(visible);
-
-      if (visible) {
-        // Tab just became visible - refresh immediately
-        console.log("👁️ Tab visible - refreshing data");
-        loadActivePasses();
-      } else {
-        console.log("🙈 Tab hidden - pausing auto-refresh");
+    const fetchRooms = async () => {
+      try {
+        const staffSnapshot = await getDocs(collection(db, COLLECTIONS.STAFF));
+        const rooms = staffSnapshot.docs
+          .map((doc) => doc.data().room)
+          .filter(Boolean);
+        const uniqueRooms = [...new Set(rooms)].sort((a, b) =>
+          a.toString().localeCompare(b.toString(), undefined, { numeric: true })
+        );
+        console.log("✅ Loaded rooms:", uniqueRooms);
+        setAllRooms(uniqueRooms);
+      } catch (error) {
+        console.error("Error fetching rooms:", error);
       }
     };
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    // Load for everyone (both admin and teacher)
+    fetchRooms();
   }, []);
 
-  // Auto-refresh active passes - ONLY when tab is visible
   useEffect(() => {
+    console.log("🟢 Dashboard useEffect - isTabVisible:", isTabVisible);
+
     if (!isTabVisible) {
-      console.log("⏸️ Skipping auto-refresh setup - tab not visible");
+      console.log("⏸️ Tab not visible, skipping subscription");
       return;
     }
 
-    console.log("▶️ Starting auto-refresh - tab is visible");
-    const interval = setInterval(() => {
-      if (!document.hidden) {
-        console.log("🔄 Auto-refreshing active passes");
-        loadActivePasses();
+    console.log("▶️ Starting subscription setup...");
+    setLoading(true);
+
+    const unsubscribe = subscribeToActivePasses(
+      ({ success, passes, error }) => {
+        console.log("📬 Dashboard received callback!");
+        console.log("   Success:", success);
+        console.log("   Passes:", passes);
+        console.log("   Error:", error);
+
+        if (success) {
+          console.log(
+            "✅ Setting activePasses state with",
+            passes.length,
+            "passes"
+          );
+          setActivePasses(passes);
+        } else {
+          console.error("❌ Subscription error:", error);
+        }
+        setLoading(false);
       }
-    }, REFRESH_INTERVALS.ACTIVE_PASSES);
+    );
+
+    console.log("✅ Subscription set up, returning unsubscribe function");
 
     return () => {
-      console.log("⏹️ Stopping auto-refresh");
-      clearInterval(interval);
+      console.log("🔴 Cleaning up subscription");
+      unsubscribe();
     };
   }, [isTabVisible]);
 
-  // Auto check-in expired passes every 15 minutes (independent of visibility)
   useEffect(() => {
-    // Run immediately on mount
-    api.autoCheckInExpiredPasses();
-
-    // Then every 15 minutes
-    const interval = setInterval(() => {
-      console.log("🔄 Running auto check-in");
-      api.autoCheckInExpiredPasses();
-    }, REFRESH_INTERVALS.AUTO_CHECKIN);
-    return () => clearInterval(interval);
+    const handleVisibilityChange = () => {
+      setIsTabVisible(document.visibilityState === "visible");
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
-  const loadActivePasses = async () => {
-    setLoading(true);
-    try {
-      const result = await api.getActivePasses({
-        roomFrom: filterRoom,
-        destination: filterDestination,
-        searchTerm: searchTerm,
-      });
-
-      if (result.success) {
-        setActivePasses(result.passes || []);
-        setLastUpdate(new Date());
-      }
-    } catch (error) {
-      console.error("Error loading passes:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadRooms = async () => {
-    try {
-      const result = await api.getRoomList();
-
-      if (result.success) {
-        setRooms(result.rooms || []);
-      } else {
-        console.log("getRoomList failed:", result.error);
-      }
-    } catch (error) {
-      console.error("Error loading rooms:", error);
-    }
-  };
-
-  const loadDestinations = async () => {
-    try {
-      const result = await api.getDestinationList();
-      if (result.success) {
-        setDestinations(result.destinations || []);
-      }
-    } catch (error) {
-      console.error("Error loading destinations:", error);
-    }
-  };
-
   const handleCheckIn = async (passId, studentName) => {
-    // Prevent double-click
-    if (checkingIn.has(passId)) {
-      console.log("⚠️ Already checking in:", passId);
-      return;
-    }
-
-    // Mark as checking in
-    setCheckingIn((prev) => new Set(prev).add(passId));
-
     // Optimistically remove from UI
     setActivePasses((prev) => prev.filter((p) => p.id !== passId));
 
-    try {
-      const result = await api.checkIn(passId);
+    // Check in the pass
+    const result = await checkInPass(passId);
 
-      if (!result.success) {
-        // If failed, add back to list
-        console.error("Check-in failed:", result.error);
-        alert(`Failed to check in ${studentName}. Please try again.`);
-        await loadActivePasses();
-      }
-    } catch (error) {
-      console.error("Error checking in:", error);
-      alert("Error checking in student. Please try again.");
-      await loadActivePasses();
-    } finally {
-      // Remove from checking-in set
-      setCheckingIn((prev) => {
-        const next = new Set(prev);
-        next.delete(passId);
-        return next;
-      });
+    // If it failed, show error and reload
+    if (!result.success) {
+      console.error("Check-in failed:", result.error);
+      alert(`Failed to check in ${studentName}. ${result.error}`);
+      // Optionally reload to get current state - or you could re-add the pass
     }
   };
 
-  // Memoized filtered passes for performance
-  const filteredPasses = useMemo(() => {
-    return activePasses.filter((pass) => {
-      const matchesSearch =
-        searchTerm === "" ||
-        pass.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(pass.studentId).includes(searchTerm);
+  const handleLogout = async () => {
+    await signOut(); //
+  };
 
-      let matchesRoom = filterRoom === "";
-      if (!matchesRoom && filterRoom !== "") {
-        const matchesOrigin = String(pass.roomFrom) === filterRoom;
-        const destinationMatch = pass.destination.match(/\(([^)]+)\)/);
-        const destinationRoom = destinationMatch
-          ? destinationMatch[1]
-          : pass.destination;
-        const matchesDestination = destinationRoom === filterRoom;
-        matchesRoom = matchesOrigin || matchesDestination;
+  // --- Memoized Filtered Passes (FIXED) ---
+  // This now handles ALL filtering on the client side
+  const filteredPasses = useMemo(() => {
+    console.log("🔍 Filtering passes...");
+    console.log("   activePasses count:", activePasses.length);
+    console.log("   searchTerm:", searchTerm);
+    console.log("   filterRoom:", filterRoom);
+    console.log("   filterDestination:", filterDestination);
+
+    const lowerSearchTerm = searchTerm.toLowerCase();
+
+    const filtered = activePasses.filter((pass) => {
+      // Filter 1: Search Term (Name or ID)
+      if (searchTerm) {
+        const nameMatch = pass.studentName
+          ?.toLowerCase()
+          .includes(lowerSearchTerm);
+        const idMatch = pass.studentId?.includes(lowerSearchTerm);
+        if (!nameMatch && !idMatch) {
+          console.log("   ❌ Pass filtered out by search:", pass.studentName);
+          return false;
+        }
       }
 
-      const matchesDestination =
-        filterDestination === "" ||
-        pass.destination
-          .toLowerCase()
-          .includes(filterDestination.toLowerCase());
+      // Filter 2: Room
+      if (filterRoom) {
+        if (pass.roomFrom !== filterRoom) {
+          console.log(
+            "   ❌ Pass filtered out by room:",
+            pass.roomFrom,
+            "vs",
+            filterRoom
+          );
+          return false;
+        }
+      }
 
-      return matchesSearch && matchesRoom && matchesDestination;
+      // Filter 3: Destination
+      if (filterDestination) {
+        const lowerDest = filterDestination.toLowerCase();
+        if (
+          !pass.destination?.toLowerCase().includes(lowerDest) &&
+          !pass.customDestination?.toLowerCase().includes(lowerDest)
+        ) {
+          console.log("   ❌ Pass filtered out by destination");
+          return false;
+        }
+      }
+
+      console.log("   ✅ Pass included:", pass.studentName);
+      return true;
     });
+
+    console.log("✅ Final filtered passes count:", filtered.length);
+    return filtered;
   }, [activePasses, searchTerm, filterRoom, filterDestination]);
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Header Bar */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -1297,342 +1349,175 @@ const Dashboard = ({ userRole, userRoom, userEmail, api }) => {
                   ? "Administrator View"
                   : `Room ${userRoom} - Teacher View`}
               </p>
-              {lastUpdate && (
-                <div className="flex items-center gap-2 mt-1">
-                  <p className="text-xs text-gray-500">
-                    Last updated: {lastUpdate.toLocaleTimeString()}
-                  </p>
-                  {!isTabVisible && (
-                    <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
-                      ⏸️ Paused (tab hidden)
-                    </span>
-                  )}
-                  {isTabVisible && (
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
-                      ▶️ Live
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setView("active")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  view === "active"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                Active Passes
-              </button>
-              <button
-                onClick={() => setView("today")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-                  view === "today"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                <Clock size={18} />
-                Today
-              </button>
-              <button
-                onClick={() => setView("analytics")}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
-                  view === "analytics"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                <BarChart3 size={18} />
-                Analytics
-              </button>
-              <button
-                onClick={loadActivePasses}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
-                disabled={loading}
-              >
-                <RefreshCw
-                  size={18}
-                  className={loading ? "animate-spin" : ""}
-                />
-                Refresh
-              </button>
+            <div className="flex items-center gap-4">
+              {/* View Toggles */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setView("active")}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    view === "active"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  Active Passes
+                </button>
+                <button
+                  onClick={() => setView("today")}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    view === "today"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => setView("analytics")}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    view === "analytics"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  Analytics
+                </button>
+              </div>
+              {/* Nav Links */}
+              <div className="flex items-center gap-2 border-l pl-4">
+                <Link
+                  to="/"
+                  className="px-4 py-2 rounded-lg font-medium transition-colors bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-2"
+                >
+                  <Home size={18} />
+                  Student View
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 rounded-lg font-medium transition-colors bg-red-100 text-red-700 hover:bg-red-200 flex items-center gap-2"
+                >
+                  <User size={18} />
+                  Logout
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Main Content Area */}
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {/* Filter Bar */}
+        {view === "active" && (
+          <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search by name or ID..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border rounded-lg"
+              />
+              <Search
+                size={20}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+            </div>
+            <div>
+              <select
+                value={filterRoom}
+                onChange={(e) => setFilterRoom(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg bg-white"
+              >
+                <option value="">All Rooms</option>
+                {allRooms.map((room) => (
+                  <option key={room} value={room}>
+                    Room {room}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Filter by destination..."
+                value={filterDestination}
+                onChange={(e) => setFilterDestination(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border rounded-lg"
+              />
+              <MapPin
+                size={20}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* --- Content based on view --- */}
         {view === "active" ? (
-          <>
-            <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="relative">
-                  <Search
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={20}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search by name or ID..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                </div>
-
-                <select
-                  value={filterRoom}
-                  onChange={(e) => setFilterRoom(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                >
-                  <option value="">All Rooms</option>
-                  {rooms.map((room) => (
-                    <option key={room} value={room}>
-                      {/^\d+$/.test(room) ? `Room ${room}` : room}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={filterDestination}
-                  onChange={(e) => setFilterDestination(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 capitalize"
-                >
-                  <option value="">All Destinations</option>
-                  {destinations.map((dest) => (
-                    <option
-                      key={dest}
-                      value={dest.toLowerCase()}
-                      className="capitalize"
+          <div className="bg-white rounded-lg shadow-sm border">
+            {loading && filteredPasses.length === 0 && (
+              <p className="text-center p-12">Loading...</p>
+            )}
+            {!loading && filteredPasses.length === 0 && (
+              <p className="text-center p-12">No active passes found.</p>
+            )}
+            {filteredPasses.length > 0 && (
+              <div className="divide-y">
+                {filteredPasses.map((pass) => (
+                  <div
+                    key={pass.id}
+                    className="p-4 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="bg-indigo-100 text-indigo-700 p-3 rounded-full">
+                        <User size={24} />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold">
+                          {pass.studentName || "Name Missing"}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          ID: {pass.studentId || "ID Missing"}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1 text-sm text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <MapPin size={16} className="text-blue-500" />
+                          <span>
+                            From <strong>Room {pass.roomFrom}</strong> to{" "}
+                            <strong className="capitalize">
+                              {pass.destination}
+                            </strong>
+                          </span>
+                        </div>
+                        <div
+                          className={`flex items-center gap-1 ${getTimeColor(
+                            pass.checkOutTime
+                          )}`}
+                        >
+                          <Clock size={16} />
+                          <span>{getTimeSince(pass.checkOutTime)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleCheckIn(pass.id, pass.studentName)}
+                      className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
                     >
-                      {dest}
-                    </option>
-                  ))}
-                </select>
+                      <CheckCircle size={18} />
+                      Check In
+                    </button>
+                  </div>
+                ))}
               </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-sm">
-              <div className="px-6 py-4 border-b flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-800">
-                  Currently Out of Class ({filteredPasses.length})
-                </h2>
-                {filteredPasses.length > 0 && (
-                  <span className="text-sm text-gray-600">
-                    Showing {filteredPasses.length}{" "}
-                    {filteredPasses.length === 1 ? "student" : "students"}
-                  </span>
-                )}
-              </div>
-
-              {loading && activePasses.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">
-                  <RefreshCw className="animate-spin mx-auto mb-2" size={24} />
-                  Loading passes...
-                </div>
-              ) : filteredPasses.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">
-                  <CheckCircle
-                    className="mx-auto mb-2 text-green-500"
-                    size={48}
-                  />
-                  <p className="font-medium">
-                    No students currently out of class
-                  </p>
-                  <p className="text-sm mt-1">
-                    All students are in their classrooms
-                  </p>
-                </div>
-              ) : (
-                <div className="divide-y max-h-[600px] overflow-y-auto">
-                  {(() => {
-                    const fromRoomPasses = filteredPasses.filter(
-                      (pass) =>
-                        String(pass.roomFrom) === filterRoom &&
-                        filterRoom !== ""
-                    );
-
-                    const toRoomPasses = filteredPasses.filter((pass) => {
-                      if (filterRoom === "") return false;
-                      const destinationMatch =
-                        pass.destination.match(/\(([^)]+)\)/);
-                      const destinationRoom = destinationMatch
-                        ? destinationMatch[1]
-                        : pass.destination;
-                      return (
-                        destinationRoom === filterRoom &&
-                        String(pass.roomFrom) !== filterRoom
-                      );
-                    });
-
-                    return (
-                      <>
-                        {(filterRoom === "" ? filteredPasses : fromRoomPasses)
-                          .length > 0 && (
-                          <>
-                            {filterRoom !== "" && (
-                              <div className="p-3 bg-orange-100 border-b-2 border-orange-300 font-semibold text-orange-800 flex items-center gap-2">
-                                <MapPin size={18} />
-                                From Room {filterRoom} ({fromRoomPasses.length})
-                              </div>
-                            )}
-                            {(filterRoom === ""
-                              ? filteredPasses
-                              : fromRoomPasses
-                            ).map((pass) => (
-                              <div
-                                key={pass.id}
-                                className="p-4 hover:bg-gray-50 transition-colors"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-3 mb-2">
-                                      <div className="bg-indigo-100 text-indigo-700 w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm">
-                                        {pass.studentName
-                                          .split(" ")
-                                          .map((n) => n[0])
-                                          .join("")}
-                                      </div>
-                                      <div>
-                                        <h3 className="font-semibold text-gray-800">
-                                          {pass.studentName}
-                                        </h3>
-                                        <p className="text-sm text-gray-600">
-                                          ID: {pass.studentId}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-wrap gap-4 text-sm ml-13">
-                                      <div className="flex items-center gap-1 text-gray-600">
-                                        <MapPin
-                                          size={16}
-                                          className="text-gray-400"
-                                        />
-                                        <span>From Room {pass.roomFrom}</span>
-                                      </div>
-                                      <div className="flex items-center gap-1 text-indigo-600">
-                                        <MapPin
-                                          size={16}
-                                          className="text-indigo-500"
-                                        />
-                                        <span className="capitalize">
-                                          To {pass.destination}
-                                        </span>
-                                      </div>
-                                      <div
-                                        className={`flex items-center gap-1 ${getTimeColor(
-                                          pass.checkOutTime
-                                        )}`}
-                                      >
-                                        <Clock size={16} />
-                                        <span>
-                                          {getTimeSince(pass.checkOutTime)}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <button
-                                    onClick={() =>
-                                      handleCheckIn(pass.id, pass.studentName)
-                                    }
-                                    className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
-                                  >
-                                    <CheckCircle size={18} />
-                                    Check In
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </>
-                        )}
-
-                        {toRoomPasses.length > 0 && (
-                          <>
-                            <div className="p-3 bg-blue-100 border-b-2 border-blue-300 font-semibold text-blue-800 flex items-center gap-2">
-                              <MapPin size={18} />
-                              Coming to Room {filterRoom} ({toRoomPasses.length}
-                              )
-                            </div>
-                            {toRoomPasses.map((pass) => (
-                              <div
-                                key={pass.id}
-                                className="p-4 bg-blue-50 hover:bg-blue-100 transition-colors"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-3 mb-2">
-                                      <div className="bg-blue-100 text-blue-700 w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm">
-                                        {pass.studentName
-                                          .split(" ")
-                                          .map((n) => n[0])
-                                          .join("")}
-                                      </div>
-                                      <div>
-                                        <h3 className="font-semibold text-gray-800">
-                                          {pass.studentName}
-                                        </h3>
-                                        <p className="text-sm text-gray-600">
-                                          ID: {pass.studentId}
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-wrap gap-4 text-sm ml-13">
-                                      <div className="flex items-center gap-1 text-gray-600">
-                                        <MapPin
-                                          size={16}
-                                          className="text-gray-400"
-                                        />
-                                        <span>From Room {pass.roomFrom}</span>
-                                      </div>
-                                      <div className="flex items-center gap-1 text-blue-600">
-                                        <MapPin
-                                          size={16}
-                                          className="text-blue-500"
-                                        />
-                                        <span className="capitalize">
-                                          To {pass.destination}
-                                        </span>
-                                      </div>
-                                      <div
-                                        className={`flex items-center gap-1 ${getTimeColor(
-                                          pass.checkOutTime
-                                        )}`}
-                                      >
-                                        <Clock size={16} />
-                                        <span>
-                                          {getTimeSince(pass.checkOutTime)}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <button
-                                    onClick={() =>
-                                      handleCheckIn(pass.id, pass.studentName)
-                                    }
-                                    className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
-                                  >
-                                    <CheckCircle size={18} />
-                                    Check In
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
-          </>
+            )}
+          </div>
         ) : view === "today" ? (
-          <TodayView userRole={userRole} userRoom={userRoom} api={api} />
+          <TodayView userRole={userRole} userRoom={userRoom} />
         ) : (
-          <AnalyticsView api={api} />
+          <AnalyticsView />
         )}
       </div>
     </div>

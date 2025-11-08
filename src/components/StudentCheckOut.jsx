@@ -1,15 +1,25 @@
 // src/components/StudentCheckOut.jsx
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom"; // Import Link
+import { useAuth } from "../hooks/useAuth"; // Import our new hook
 import { LogOut, AlertCircle, CheckCircle, RefreshCw } from "lucide-react";
-import { swr } from "../lib/swrCache";
+import { TIMEOUTS } from "../constants";
+// --- ADD THESE IMPORTS BACK ---
 import {
-  TIMEOUTS,
-  CACHE_TTL,
-  DESTINATIONS_SNAPSHOT,
-  CACHE_VERSIONS,
-} from "../constants";
+  getStudent,
+  getDestinations,
+  getSystemSettings,
+  createCheckout,
+} from "../firebase/db";
+// ------------------------------
+import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
+import { db } from "../firebase/config";
 
-const StudentCheckOut = ({ roomNumber, api }) => {
+const StudentCheckOut = ({ roomNumber }) => {
+  // Use the central auth state
+  const { user, authLoading } = useAuth();
+
+  // --- ADD ALL YOUR STATE VARIABLES BACK ---
   const [systemSettings, setSystemSettings] = useState(null);
   const [checkoutBlocked, setCheckoutBlocked] = useState(false);
   const [blockReason, setBlockReason] = useState("");
@@ -19,15 +29,17 @@ const StudentCheckOut = ({ roomNumber, api }) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [destinations, setDestinations] = useState(DESTINATIONS_SNAPSHOT);
+  const [destinations, setDestinations] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [filteredStaff, setFilteredStaff] = useState([]);
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
+  // ------------------------------------------
 
+  // --- Helper Function ---
   const checkIfCheckoutAllowed = (settings) => {
     const now = new Date();
 
-    if (!settings.CHECKOUT_ENABLED) {
+    if (!settings.checkoutEnabled) {
       setCheckoutBlocked(true);
       setBlockReason(
         "Hall passes are currently disabled. Please check with the office."
@@ -35,36 +47,11 @@ const StudentCheckOut = ({ roomNumber, api }) => {
       return false;
     }
 
-    // Check if weekend
-    const dayOfWeek = now.getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      setCheckoutBlocked(true);
-      setBlockReason("Hall passes are only available during school days.");
-      return false;
-    }
-
-    // Check if after day end time
-    const dayEndStr = settings.DAY_END || "2:46 PM";
-    const timeMatch = dayEndStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-
-    if (timeMatch) {
-      let hours = parseInt(timeMatch[1]);
-      const minutes = parseInt(timeMatch[2]);
-      const isPM = timeMatch[3].toUpperCase() === "PM";
-
-      if (isPM && hours !== 12) hours += 12;
-      if (!isPM && hours === 12) hours = 0;
-
-      const dayEnd = new Date(now);
-      dayEnd.setHours(hours, minutes, 0, 0);
-
-      if (now >= dayEnd) {
+    if (settings.blockWeekends) {
+      const dayOfWeek = now.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
         setCheckoutBlocked(true);
-        setBlockReason(
-          "Hall passes are only available during school hours (until " +
-            dayEndStr +
-            ")."
-        );
+        setBlockReason("Hall passes are only available during school days.");
         return false;
       }
     }
@@ -74,89 +61,60 @@ const StudentCheckOut = ({ roomNumber, api }) => {
     return true;
   };
 
+  // --- Auth & Data Loading Effect ---
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      // Destinations
-      await swr({
-        key: "destinations",
-        version: CACHE_VERSIONS.DESTINATIONS,
-        ttlMs: CACHE_TTL.DESTINATIONS,
-        fetcher: async () => {
-          const res = await api.getDestinationList();
-          return res?.success ? res.destinations || [] : DESTINATIONS_SNAPSHOT;
-        },
-        onUpdate: (fresh) => {
-          if (!mounted) return;
-          setDestinations(fresh?.length ? fresh : DESTINATIONS_SNAPSHOT);
-        },
-      });
+    // We must wait for the auth check to finish
+    if (authLoading) {
+      return; // Still checking who the user is
+    }
 
-      // Staff list
-      await swr({
-        key: "staffList",
-        version: CACHE_VERSIONS.STAFF,
-        ttlMs: CACHE_TTL.STAFF,
-        fetcher: async () => {
-          const res = await api.getStaffDropdownList();
-          return res?.success ? res.staffList || [] : [];
-        },
-        onUpdate: (fresh) => {
-          if (!mounted) return;
-          setStaffList(fresh);
-          setFilteredStaff(fresh);
-        },
-      });
-
-      // System settings
-      await swr({
-        key: "systemSettings",
-        version: async () => {
-          try {
-            const params = new URLSearchParams({
-              action: "getSystemSettings",
-              _check: "version",
-            });
-            const API_BASE = process.env.REACT_APP_API_BASE;
-            const response = await fetch(`${API_BASE}?${params}`);
-            const data = await response.json();
-            return data?.settings?.SETTINGS_VERSION || 1;
-          } catch {
-            return 1;
+    if (user) {
+      // --- User is logged in ---
+      // Now we can safely load all data
+      const loadData = async () => {
+        try {
+          // Load destinations
+          const destResult = await getDestinations();
+          if (destResult.success && destResult.destinations) {
+            const destNames = destResult.destinations.map((d) => d.name);
+            setDestinations(destNames);
+          } else {
+            setDestinations(["Restroom", "Nurse", "Guidance", "Other"]);
           }
-        },
-        ttlMs: CACHE_TTL.SETTINGS,
-        fetcher: async () => {
-          try {
-            const res = await api.getSystemSettings();
-            return res?.success
-              ? res.settings
-              : {
-                  CHECKOUT_ENABLED: true,
-                  MAX_CHECKOUT_MINUTES: 46,
-                  DAY_END: "2:46 PM",
-                };
-          } catch (error) {
-            console.error("Error fetching settings:", error);
-            return {
-              CHECKOUT_ENABLED: true,
-              MAX_CHECKOUT_MINUTES: 46,
-              DAY_END: "2:46 PM",
-            };
-          }
-        },
-        onUpdate: (fresh) => {
-          if (!mounted) return;
-          setSystemSettings(fresh);
-          checkIfCheckoutAllowed(fresh);
-        },
-      });
-    })().catch(() => {});
-    return () => {
-      mounted = false;
-    };
-  }, [api]);
 
+          // Load staff for "Other" dropdown
+          const staffQuery = query(
+            collection(db, "staff"),
+            where("active", "==", true),
+            orderBy("name")
+          );
+          const staffSnapshot = await getDocs(staffQuery);
+          const staff = staffSnapshot.docs.map(
+            (doc) => doc.data().dropdownText
+          );
+          setStaffList(staff);
+          setFilteredStaff(staff);
+          console.log("Loaded staff:", staff.length);
+
+          // Load system settings
+          const settingsResult = await getSystemSettings();
+          if (settingsResult.success) {
+            setSystemSettings(settingsResult.settings);
+            checkIfCheckoutAllowed(settingsResult.settings);
+          }
+        } catch (error) {
+          console.error("Error during data load:", error);
+        }
+      };
+
+      loadData();
+    } else {
+      // --- User is not logged in ---
+      // (We could load public data like destinations here if we wanted)
+    }
+  }, [user, authLoading]); // Run this effect when auth state changes
+
+  // --- ADD ALL YOUR HELPER FUNCTIONS BACK ---
   const handleStaffSearch = (searchText) => {
     setCustomDestination(searchText);
 
@@ -205,16 +163,16 @@ const StudentCheckOut = ({ roomNumber, api }) => {
       return;
     }
 
-    // Start loading - NO optimistic UI
+    // Start loading
     setLoading(true);
     setSubmitting(true);
     setStatus(null);
 
     try {
       // Step 1: Verify student exists
-      const studentCheck = await api.getStudentName(studentId);
+      const studentCheck = await getStudent(studentId);
 
-      if (!studentCheck.success || !studentCheck.studentName) {
+      if (!studentCheck.success || !studentCheck.student) {
         setStatus({
           type: "error",
           message: "Student ID not found. Please check and try again.",
@@ -224,12 +182,10 @@ const StudentCheckOut = ({ roomNumber, api }) => {
         return;
       }
 
-      // Step 2: Auto check-in any expired passes
-      await api.autoCheckInExpiredPasses();
-
-      // Step 3: Actually create the checkout (WAIT for it to complete)
-      const result = await api.checkOut(
+      // Step 3: Actually create the checkout
+      const result = await createCheckout(
         studentId,
+        studentCheck.student.name, // <-- ADD THIS
         destination,
         roomNumber,
         destination === "other" ? customDestination : null
@@ -246,13 +202,13 @@ const StudentCheckOut = ({ roomNumber, api }) => {
         return;
       }
 
-      // SUCCESS - Now we know it worked!
+      // SUCCESS
       const finalDestination =
         destination === "other" ? customDestination : destination;
 
       setStatus({
         type: "success",
-        message: `${studentCheck.studentName} checked out successfully. Please proceed to ${finalDestination}.`,
+        message: `${studentCheck.student.name} checked out successfully. Please proceed to ${finalDestination}.`,
       });
 
       // Clear the form
@@ -262,20 +218,15 @@ const StudentCheckOut = ({ roomNumber, api }) => {
       setLoading(false);
       setSubmitting(false);
 
-      // Clear success message after 3 seconds
+      // Clear success message
       setTimeout(() => {
         setStatus(null);
       }, TIMEOUTS.SUCCESS_MESSAGE);
     } catch (error) {
       console.error("Checkout error:", error);
-
-      // Network/connection error
       setStatus({
         type: "error",
-        message:
-          error.message?.includes("fetch") || error.message?.includes("network")
-            ? "Connection error. Please check your internet and try again."
-            : "System error. Please contact your teacher.",
+        message: "System error. Please contact your teacher.",
       });
       setLoading(false);
       setSubmitting(false);
@@ -287,7 +238,53 @@ const StudentCheckOut = ({ roomNumber, api }) => {
       handleSubmit();
     }
   };
+  // ------------------------------------------
 
+  // --- Render Logic ---
+  if (authLoading) {
+    // This is the new "isLoading"
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!user) {
+    // Show login prompt if not authenticated
+    return (
+      <div
+        style={{
+          padding: "2rem",
+          textAlign: "center",
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <h2>Welcome to the Hall Pass System</h2>
+        <p>Please log in with your @ofcs.net account to continue.</p>
+        <Link
+          to="/login"
+          style={{
+            fontSize: "1.2rem",
+            padding: "0.5rem 1rem",
+            marginTop: "1rem",
+            backgroundColor: "#4f46e5",
+            color: "white",
+            textDecoration: "none",
+            borderRadius: "0.5rem",
+          }}
+        >
+          Sign in with Google
+        </Link>
+      </div>
+    );
+  }
+
+  // Main component render (if logged in)
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4"
@@ -295,6 +292,17 @@ const StudentCheckOut = ({ roomNumber, api }) => {
         background: "linear-gradient(to bottom right, #f0f4ff, #d9e5ff)",
       }}
     >
+      {/* --- ADD THIS LINK FOR STAFF --- */}
+      {user.role && (
+        <Link
+          to="/dashboard"
+          className="fixed top-4 right-4 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 shadow-lg z-50"
+        >
+          Staff Dashboard →
+        </Link>
+      )}
+
+      {/* --- THE REST OF YOUR COMPONENT --- */}
       <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
         <div className="text-center mb-6">
           <div
@@ -380,7 +388,7 @@ const StudentCheckOut = ({ roomNumber, api }) => {
           {destination === "other" && (
             <div className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Staff Member
+                Select Staff Member or Room
               </label>
               <input
                 type="text"

@@ -14,10 +14,10 @@ const db = admin.firestore();
 
 // Parse CSV
 function parseCSV(csvText) {
-  const lines = csvText.trim().split('\n');
+  // FIX 1: Split on newlines correctly (handles \r\n and \n)
+  const lines = csvText.trim().split(/\r?\n/);
   const students = [];
   
-  // Check if first line is header
   const firstLine = lines[0].toLowerCase();
   const hasHeader = firstLine.includes('studentid') || 
                     firstLine.includes('name') || 
@@ -29,53 +29,52 @@ function parseCSV(csvText) {
     const line = lines[i].trim();
     if (!line) continue;
     
-    // Split by comma, handling quoted fields
-    const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
-    const cleanParts = parts.map(p => p.replace(/^"|"$/g, '').trim());
+    // FIX 2: Use simple split, the regex was splitting names
+    const parts = line.split(',');
+    
+    // Trim each part
+    const cleanParts = parts.map(p => p.trim());
     
     if (cleanParts.length < 2) continue;
     
     const studentId = cleanParts[0];
-    const studentName = cleanParts[1];
+    const studentNameFromCsv = cleanParts[1]; // This is "Emma Johnson"
     const grade = cleanParts[2] || '';
     const email = cleanParts[3] || '';
     
-    // Validate student ID (6 digits)
     if (!/^\d{6}$/.test(studentId)) {
-      console.log(`⚠️ Skipping invalid ID: ${studentId}`);
+      console.warn(`Skipping invalid Student ID: ${studentId} (Line: ${line})`);
       continue;
     }
     
-    // Validate name
-    if (!studentName || studentName.length < 2) {
-      console.log(`⚠️ Skipping student with invalid name: ${studentId}`);
-      continue;
-    }
-    
-    students.push({
-      studentId,
-      name: studentName,
-      grade,
-      email,
-      active: true
+    // FIX 3: Save to 'name' field
+    students.push({ 
+      studentId, 
+      name: studentNameFromCsv, 
+      grade, 
+      email 
     });
   }
   
   return students;
 }
+// --- END OF FIXES ---
 
-// Import students to Firestore
 async function importStudents(csvPath) {
   try {
     console.log('📖 Reading CSV file...');
-    const csvText = fs.readFileSync(csvPath, 'utf-8');
+    const csvText = fs.readFileSync(path.resolve(csvPath), 'utf-8');
     
     console.log('🔍 Parsing students...');
     const students = parseCSV(csvText);
     
+    if (students.length === 0) {
+      console.error('❌ No valid students found in CSV. Check file format.');
+      process.exit(1);
+    }
+    
     console.log(`✅ Found ${students.length} valid students`);
     
-    // First, delete the placeholder
     try {
       await db.collection('students').doc('placeholder').delete();
       console.log('🗑️ Deleted placeholder document');
@@ -83,7 +82,6 @@ async function importStudents(csvPath) {
       // Placeholder might not exist, that's fine
     }
     
-    // Import in batches of 500 (Firestore limit)
     const batchSize = 500;
     let imported = 0;
     
@@ -93,7 +91,8 @@ async function importStudents(csvPath) {
       
       chunk.forEach(student => {
         const docRef = db.collection('students').doc(student.studentId);
-        batch.set(docRef, student);
+        // This will OVERWRITE existing students with the correct data
+        batch.set(docRef, student); 
       });
       
       await batch.commit();
@@ -102,7 +101,6 @@ async function importStudents(csvPath) {
     }
     
     console.log('🎉 Import complete!');
-    console.log(`✅ Total students imported: ${imported}`);
     
   } catch (error) {
     console.error('❌ Error importing students:', error);
@@ -112,17 +110,11 @@ async function importStudents(csvPath) {
   process.exit(0);
 }
 
-// Get CSV path from command line argument
 const csvPath = process.argv[2];
 
 if (!csvPath) {
   console.error('❌ Please provide path to CSV file');
-  console.log('Usage: node scripts/importStudents.js path/to/students.csv');
-  process.exit(1);
-}
-
-if (!fs.existsSync(csvPath)) {
-  console.error('❌ CSV file not found:', csvPath);
+  console.log('Usage: node scripts/importStudents.js path/to/your/students.csv');
   process.exit(1);
 }
 

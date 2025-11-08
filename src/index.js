@@ -1,13 +1,14 @@
 // src/index.js
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom"; // Import the router
+import { AuthProvider } from "./hooks/useAuth"; // Import our provider
 import App from "./App";
-// If you have global styles, keep this. If not, you can remove it.
-import "./index.css";
+import "./index.css"; // Your styles
 
 /**
- * Minimal Error Boundary to prevent a white screen on unexpected runtime errors.
- * No behavior change to your app logic — just a safer top-level shell.
+ * Minimal Error Boundary (Your existing code, no changes)
+ *
  */
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -20,14 +21,10 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    // You can wire this to any logging service if you like.
-    // For now, keep it simple:
-    // eslint-disable-next-line no-console
     console.error("Top-level error boundary caught:", error, info);
   }
 
   handleReload = () => {
-    // Hard reload to clear transient state if something went wrong.
     window.location.reload();
   };
 
@@ -86,12 +83,12 @@ class ErrorBoundary extends React.Component {
 }
 
 /**
- * Optional: capture unhandled promise rejections so they show up in dev logs
- * instead of failing silently.
+ * Optional: capture unhandled promise rejections
+ * (Your existing code, no changes)
+ *
  */
 if (process.env.NODE_ENV !== "production") {
   window.addEventListener("unhandledrejection", (event) => {
-    // eslint-disable-next-line no-console
     console.warn("Unhandled promise rejection:", event.reason);
   });
 }
@@ -100,14 +97,17 @@ const container = document.getElementById("root");
 const root = createRoot(container);
 
 /**
- * Note: In React 18, StrictMode intentionally double-invokes certain lifecycles in development
- * to highlight side-effects. Make sure your effects clean up intervals/timeouts and are idempotent.
- * This does NOT affect production builds.
+ * This is the part to fix.
+ * We wrap the <App> component in <BrowserRouter> and <AuthProvider>.
  */
 root.render(
   <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
+    <BrowserRouter> {/* This provides the "Router" context */}
+      <AuthProvider> {/* This provides the "Auth" context */}
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      </AuthProvider>
+    </BrowserRouter>
   </StrictMode>
 );
