@@ -36,6 +36,7 @@ import {
   writeBatch,
   updateDoc,
   deleteDoc,
+  setDoc,
 } from "firebase/firestore";
 import { db } from "../firebase/config";
 
@@ -1365,7 +1366,6 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-
     if (!isTabVisible) {
       return;
     }
@@ -1374,7 +1374,6 @@ const Dashboard = () => {
 
     const unsubscribe = subscribeToActivePasses(
       ({ success, passes, error }) => {
-
         if (success) {
           setActivePasses(passes);
         } else {
@@ -1399,6 +1398,111 @@ const Dashboard = () => {
     };
   }, []);
 
+  // Auto check-in expired passes (runs every 15 minutes for admins)
+  useEffect(() => {
+    // Only run for admins
+    if (userRole !== "admin") return;
+
+    console.log("🔄 Auto check-in enabled for admin");
+
+    const checkExpiredPasses = async () => {
+      try {
+        // Get max checkout time from settings
+        const settingsResult = await getSystemSettings();
+        const maxMinutes = settingsResult.settings?.maxCheckoutMinutes || 46;
+
+        console.log(
+          `⏰ Checking for passes older than ${maxMinutes} minutes...`
+        );
+
+        // Calculate cutoff time
+        const cutoff = new Date();
+        cutoff.setMinutes(cutoff.getMinutes() - maxMinutes);
+
+        // Query expired passes
+        const expiredQuery = query(
+          collection(db, COLLECTIONS.ACTIVE_PASSES),
+          where("status", "==", "OUT"),
+          where("checkOutTime", "<", Timestamp.fromDate(cutoff))
+        );
+
+        const snapshot = await getDocs(expiredQuery);
+
+        if (snapshot.empty) {
+          console.log("✅ No expired passes found");
+          return;
+        }
+
+        console.log(
+          `⚠️ Found ${snapshot.size} expired passes - auto-checking in...`
+        );
+
+        // Check in each expired pass with adjusted time
+        let successCount = 0;
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+          const passId = docSnap.id;
+
+          // Calculate the adjusted check-in time (checkOutTime + maxMinutes)
+          const checkOutDate = data.checkOutTime.toDate();
+          const adjustedCheckInDate = new Date(checkOutDate);
+          adjustedCheckInDate.setMinutes(
+            adjustedCheckInDate.getMinutes() + maxMinutes
+          );
+
+          try {
+            // Create history record with adjusted times
+            const historyRef = doc(collection(db, COLLECTIONS.PASS_HISTORY));
+            await setDoc(historyRef, {
+              ...data,
+              status: "IN",
+              passId: passId,
+              checkInTime: Timestamp.fromDate(adjustedCheckInDate), // Adjusted time
+              duration: maxMinutes, // Capped at max minutes
+              autoCheckedIn: true, // Flag to indicate auto check-in
+              actualCheckInTime: Timestamp.now(), // Track when it actually happened
+              createdAt: data.createdAt ?? data.checkOutTime, // Preserve original createdAt
+            });
+
+            // Remove from active passes
+            await deleteDoc(doc(db, COLLECTIONS.ACTIVE_PASSES, passId));
+
+            successCount++;
+            const actualMinutes = Math.round(
+              (Date.now() - checkOutDate.getTime()) / 60000
+            );
+            console.log(
+              `   ✅ Auto-checked in: ${data.studentName} (${data.studentId})`,
+              `- Was out ${actualMinutes} min, recorded as ${maxMinutes} min`
+            );
+          } catch (error) {
+            console.error(
+              `   ❌ Failed to check in: ${data.studentName}`,
+              error
+            );
+          }
+        }
+
+        console.log(
+          `✅ Auto-checked in ${successCount}/${snapshot.size} expired passes`
+        );
+      } catch (error) {
+        console.error("❌ Error checking expired passes:", error);
+      }
+    };
+
+    // Run immediately when dashboard opens
+    checkExpiredPasses();
+
+    // Run every 15 minutes
+    const interval = setInterval(checkExpiredPasses, 15 * 60 * 1000);
+
+    return () => {
+      console.log("🛑 Auto check-in stopped");
+      clearInterval(interval);
+    };
+  }, [userRole]);
+
   const handleCheckIn = async (passId, studentName) => {
     // Optimistically remove from UI
     setActivePasses((prev) => prev.filter((p) => p.id !== passId));
@@ -1419,7 +1523,6 @@ const Dashboard = () => {
   };
 
   const filteredPasses = useMemo(() => {
-
     const lowerSearchTerm = searchTerm.toLowerCase();
 
     // Split into FROM and TO when a specific room is selected
