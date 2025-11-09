@@ -11,6 +11,7 @@ import {
   where,
   orderBy,
   onSnapshot,
+  setDoc,
   serverTimestamp,
   writeBatch,
 } from "firebase/firestore";
@@ -134,85 +135,87 @@ export const createCheckout = async (
 };
 
 // Check in a pass
-export const checkInPass = async (passId) => {
+export async function checkInPass(passId) {
   try {
     const passRef = doc(db, COLLECTIONS.ACTIVE_PASSES, passId);
-    const passSnap = await getDoc(passRef);
-
-    if (!passSnap.exists()) {
-      return { success: false, error: "Pass not found" };
+    const snap = await getDoc(passRef);
+    if (!snap.exists()) {
+      return { success: false, error: "Active pass not found." };
     }
 
-    const passData = passSnap.data();
-    const checkInTime = new Date();
-    const checkOutTime = passData.checkOutTime?.toDate() || new Date();
-    const duration = Math.round((checkInTime - checkOutTime) / 60000);
+    const activeData = snap.data() || {};
+    const outTs = activeData.checkOutTime;
+    const inDate = new Date();
 
-    // Move to history
-    await addDoc(collection(db, COLLECTIONS.PASS_HISTORY), {
-      ...passData,
-      passId,
-      checkInTime: serverTimestamp(),
-      duration,
+    let duration = null;
+    if (outTs && typeof outTs.toMillis === "function") {
+      const ms = Date.now() - outTs.toMillis();
+      duration = ms > 0 ? Math.round(ms / 60000) : 0;
+    }
+
+    // Write to history with ALL fields (includes customDestination)
+    const historyRef = doc(collection(db, COLLECTIONS.PASS_HISTORY));
+    await setDoc(historyRef, {
+      ...activeData,
       status: "IN",
+      passId,
+      checkInTime: serverTimestamp(),          // exact server time in Firestore
+      // keep original createdAt if present, else set now so Today view sees it
+      createdAt: activeData.createdAt ?? serverTimestamp(),
+      duration,
     });
 
-    // Delete from active
+    // Remove from active
     await deleteDoc(passRef);
 
     return {
       success: true,
-      checkInTime: checkInTime.toISOString(),
+      checkInTime: inDate.toISOString(),
       duration,
+      historyId: historyRef.id,
     };
   } catch (error) {
     console.error("Error checking in:", error);
-    return { success: false, error: error.message };
+    return { success: false, error: String(error?.message || error) };
   }
-};
-
+}
 // src/firebase/db.js
 
 export const subscribeToActivePasses = (callback, filters = {}) => {
-  console.log("🟢 subscribeToActivePasses called");
+  try {
+    const q = query(
+      collection(db, COLLECTIONS.ACTIVE_PASSES),
+      where("status", "==", "OUT"),
+      orderBy("checkOutTime", "desc")
+    );
 
-  const q = query(
-    collection(db, COLLECTIONS.ACTIVE_PASSES),
-    where("status", "==", "OUT"),
-    orderBy("checkOutTime", "desc")
-  );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const passes = snap.docs.map((d) => {
+          const data = d.data() || {};
+          return {
+            id: d.id,
+            // IMPORTANT: spread so we don’t drop fields like customDestination
+            ...data,
+            // Keep Timestamps as-is for UI helpers that accept them
+            checkOutTime: data.checkOutTime ?? null,
+            checkInTime: data.checkInTime ?? null,
+          };
+        });
+        callback({ success: true, passes });
+      },
+      (err) => {
+        console.error("subscribeToActivePasses onSnapshot error:", err);
+        callback({ success: false, error: String(err), passes: [] });
+      }
+    );
 
-  console.log("🟡 Setting up onSnapshot listener...");
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      console.log("🔵 Snapshot callback fired!");
-      console.log("📊 Snapshot size:", snapshot.size);
-      console.log("📦 Raw snapshot docs:", snapshot.docs.length);
-
-      const passes = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        console.log("📄 Processing doc:", doc.id);
-        console.log("   Raw data:", data);
-
-        return {
-          id: doc.id,
-          ...data,
-          checkOutTime: data.checkOutTime?.toDate()?.toISOString(),
-        };
-      });
-
-      console.log("✅ Final passes array:", passes);
-      callback({ success: true, passes });
-    },
-    (error) => {
-      console.error("❌ Snapshot error:", error);
-      console.error("❌ Error code:", error.code);
-      console.error("❌ Error message:", error.message);
-      callback({ success: false, error: error.message, passes: [] });
-    }
-  );
+    return unsub;
+  } catch (err) {
+    console.error("subscribeToActivePasses error:", err);
+    return () => {};
+  }
 };
 
 export default {

@@ -42,7 +42,8 @@ import { db } from "../firebase/config";
 // Debug helper: enable by running `localStorage.setItem('hp_debug','1')` in the console.
 // Disable with `localStorage.removeItem('hp_debug')`.
 const HP_DEBUG =
-  process.env.NODE_ENV !== "production" && localStorage.getItem("hp_debug") === "1";
+  process.env.NODE_ENV !== "production" &&
+  localStorage.getItem("hp_debug") === "1";
 const dlog = (...args) => {
   if (HP_DEBUG) console.log("[HallPass]", ...args);
 };
@@ -535,7 +536,9 @@ const TodayView = ({ userRole, userRoom }) => {
                         <span className="font-semibold">Room {p.roomFrom}</span>{" "}
                         to{" "}
                         <span className="font-semibold capitalize">
-                          {p.destination}
+                          {p.destination === "other" && p.customDestination
+                            ? p.customDestination
+                            : p.destination}
                         </span>
                       </span>
                     </div>
@@ -635,7 +638,10 @@ const AnalyticsView = () => {
     d.setDate(d.getDate() - (nDays - 1)); // inclusive of today
     return d;
   };
-  const norm = (v) => String(v ?? "").trim().toLowerCase();
+  const norm = (v) =>
+    String(v ?? "")
+      .trim()
+      .toLowerCase();
 
   const asRow = (docSnap, source) => {
     const x = docSnap.data();
@@ -656,6 +662,7 @@ const AnalyticsView = () => {
       name: x.studentName || "",
       roomFrom: x.roomFrom != null ? String(x.roomFrom) : "",
       destination: x.destination || "",
+      customDestination: x.customDestination || null, // ← ADD THIS LINE
       createdAtISO: createdISO,
       checkOutISO: outISO,
       checkInISO: inISO,
@@ -708,50 +715,66 @@ const AnalyticsView = () => {
         snapHistInPeriod,
         snapHistOutPeriod,
         snapActiveToday,
-        snapHistOutToday
+        snapHistOutToday,
       ] = await Promise.all([
         getDocs(qActivePeriod),
         getDocs(qHistInPeriod),
         getDocs(qHistOutPeriod),
         getDocs(qActiveToday),
-        getDocs(qHistOutToday)
+        getDocs(qHistOutToday),
       ]);
 
       // Period rows
       const rowsPeriod = [];
-      snapActivePeriod.docs.forEach(d => rowsPeriod.push(asRow(d, "active")));
+      snapActivePeriod.docs.forEach((d) => rowsPeriod.push(asRow(d, "active")));
       const histMap = new Map();
-      snapHistInPeriod.docs.forEach(d => histMap.set(d.id, asRow(d, "history")));
-      snapHistOutPeriod.docs.forEach(d => {
+      snapHistInPeriod.docs.forEach((d) =>
+        histMap.set(d.id, asRow(d, "history"))
+      );
+      snapHistOutPeriod.docs.forEach((d) => {
         if (!histMap.has(d.id)) histMap.set(d.id, asRow(d, "history"));
       });
       rowsPeriod.push(...histMap.values());
 
       // Frequent users (count passes STARTED in period)
-      const startedInPeriod = rowsPeriod.filter(r => r.checkOutISO || r.createdAtISO);
+      const startedInPeriod = rowsPeriod.filter(
+        (r) => r.checkOutISO || r.createdAtISO
+      );
       const byStudent = new Map();
       for (const r of startedInPeriod) {
         const key = r.studentId || r.name;
         if (!key) continue;
-        const prev = byStudent.get(key) || { studentId: r.studentId, name: r.name, count: 0 };
+        const prev = byStudent.get(key) || {
+          studentId: r.studentId,
+          name: r.name,
+          count: 0,
+        };
         prev.count += 1;
         byStudent.set(key, prev);
       }
-      const frequentUsers = Array.from(byStudent.values()).sort((a,b) => b.count - a.count);
+      const frequentUsers = Array.from(byStudent.values()).sort(
+        (a, b) => b.count - a.count
+      );
 
       // Daily multiple (count passes STARTED today)
       const todayRows = [];
-      snapActiveToday.docs.forEach(d => todayRows.push(asRow(d, "active")));
-      snapHistOutToday.docs.forEach(d => todayRows.push(asRow(d, "history")));
+      snapActiveToday.docs.forEach((d) => todayRows.push(asRow(d, "active")));
+      snapHistOutToday.docs.forEach((d) => todayRows.push(asRow(d, "history")));
       const byStudentToday = new Map();
       for (const r of todayRows) {
         const key = r.studentId || r.name;
         if (!key) continue;
-        const prev = byStudentToday.get(key) || { studentId: r.studentId, name: r.name, count: 0 };
+        const prev = byStudentToday.get(key) || {
+          studentId: r.studentId,
+          name: r.name,
+          count: 0,
+        };
         prev.count += 1;
         byStudentToday.set(key, prev);
       }
-      const dailyMultiple = Array.from(byStudentToday.values()).sort((a,b) => b.count - a.count);
+      const dailyMultiple = Array.from(byStudentToday.values()).sort(
+        (a, b) => b.count - a.count
+      );
 
       setAnalytics({ frequentUsers, dailyMultiple, periodDays: days });
     } catch (err) {
@@ -779,12 +802,15 @@ const AnalyticsView = () => {
       const term = norm(studentSearch);
       const frequent = analytics.frequentUsers || [];
       const found =
-        frequent.find(u => String(u.studentId).toLowerCase().includes(term)) ||
-        frequent.find(u => norm(u.name).includes(term));
+        frequent.find((u) =>
+          String(u.studentId).toLowerCase().includes(term)
+        ) || frequent.find((u) => norm(u.name).includes(term));
 
       let todayCount = 0;
       if (found && analytics.dailyMultiple) {
-        const d = analytics.dailyMultiple.find(u => u.studentId === found.studentId);
+        const d = analytics.dailyMultiple.find(
+          (u) => u.studentId === found.studentId
+        );
         todayCount = d ? d.count : 0;
       }
 
@@ -796,7 +822,7 @@ const AnalyticsView = () => {
               name: found.name,
               totalPasses: found.count,
               todayPasses: todayCount,
-              period: days
+              period: days,
             }
           : { found: false, searchTerm: studentSearch }
       );
@@ -811,11 +837,11 @@ const AnalyticsView = () => {
     if (!studentId) return;
 
     if (studentResult?.detailsVisible) {
-      setStudentResult(prev => ({ ...prev, detailsVisible: false }));
+      setStudentResult((prev) => ({ ...prev, detailsVisible: false }));
       return;
     }
 
-    setStudentResult(prev => ({ ...prev, loadingDetails: true }));
+    setStudentResult((prev) => ({ ...prev, loadingDetails: true }));
 
     try {
       const since = periodStart(days);
@@ -833,40 +859,61 @@ const AnalyticsView = () => {
         orderBy("createdAt", "desc")
       );
 
-      const [snapA, snapH] = await Promise.all([getDocs(qActive), getDocs(qHistCreated)]);
+      const [snapA, snapH] = await Promise.all([
+        getDocs(qActive),
+        getDocs(qHistCreated),
+      ]);
       const rows = [];
-      snapA.docs.forEach(d => rows.push(asRow(d, "active")));
-      snapH.docs.forEach(d => rows.push(asRow(d, "history")));
+      snapA.docs.forEach((d) => rows.push(asRow(d, "active")));
+      snapH.docs.forEach((d) => rows.push(asRow(d, "history")));
 
-      rows.sort((a,b) => {
-        const ta = new Date(a.checkInISO || a.createdAtISO || a.checkOutISO || 0).getTime();
-        const tb = new Date(b.checkInISO || b.createdAtISO || b.checkOutISO || 0).getTime();
+      rows.sort((a, b) => {
+        const ta = new Date(
+          a.checkInISO || a.createdAtISO || a.checkOutISO || 0
+        ).getTime();
+        const tb = new Date(
+          b.checkInISO || b.createdAtISO || b.checkOutISO || 0
+        ).getTime();
         return tb - ta;
       });
 
-      const passHistory = rows.map(r => ({
-        date: r.createdAtISO || r.checkOutISO || r.checkInISO,
-        roomFrom: r.roomFrom,
-        destination: r.destination,
-        checkOutTime: r.checkOutISO
-          ? new Date(r.checkOutISO).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-          : "—",
-        checkInTime: r.checkInISO
-          ? new Date(r.checkInISO).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-          : null,
-        duration: r.duration,
-        status: r.status,
-      }));
+      const passHistory = rows.map((r) => {
+        // Get the display destination
+        const displayDestination =
+          r.destination === "other" && r.customDestination
+            ? r.customDestination
+            : r.destination;
 
-      setStudentResult(prev => ({
+        return {
+          date: r.createdAtISO || r.checkOutISO || r.checkInISO,
+          roomFrom: r.roomFrom,
+          destination: displayDestination, // ← Use calculated display destination
+          checkOutTime: r.checkOutISO
+            ? new Date(r.checkOutISO).toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+              })
+            : "—",
+          checkInTime: r.checkInISO
+            ? new Date(r.checkInISO).toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+              })
+            : null,
+          duration: r.duration,
+          status: r.status,
+        };
+      });
+
+      setStudentResult((prev) => ({
         ...prev,
         loadingDetails: false,
         detailsVisible: true,
-        passHistory
+        passHistory,
       }));
     } catch (err) {
       console.error("Error loading student details:", err);
-      setStudentResult(prev => ({ ...prev, loadingDetails: false }));
+      setStudentResult((prev) => ({ ...prev, loadingDetails: false }));
     }
   };
 
@@ -892,11 +939,16 @@ const AnalyticsView = () => {
     <div className="space-y-6">
       {/* STUDENT LOOKUP */}
       <div className="bg-white rounded-lg shadow-sm p-6 border-2 border-indigo-100">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Student Lookup</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Student Lookup
+        </h2>
 
         <div className="flex gap-3 mb-4">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              size={20}
+            />
             <input
               type="text"
               value={studentSearch}
@@ -939,7 +991,9 @@ const AnalyticsView = () => {
         {studentResult && (
           <div
             className={`p-4 rounded-lg border-2 ${
-              studentResult.found ? "bg-blue-50 border-blue-200" : "bg-yellow-50 border-yellow-200"
+              studentResult.found
+                ? "bg-blue-50 border-blue-200"
+                : "bg-yellow-50 border-yellow-200"
             }`}
           >
             {studentResult.found ? (
@@ -947,26 +1001,38 @@ const AnalyticsView = () => {
                 <div className="flex items-center gap-3 mb-3">
                   <User size={24} className="text-indigo-600" />
                   <div>
-                    <h3 className="font-bold text-gray-900 text-lg">{studentResult.name}</h3>
-                    <p className="text-sm text-gray-600">ID: {studentResult.studentId}</p>
+                    <h3 className="font-bold text-gray-900 text-lg">
+                      {studentResult.name}
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      ID: {studentResult.studentId}
+                    </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4 mt-4">
                   <div className="bg-white p-3 rounded-lg">
-                    <p className="text-xs text-gray-600 mb-1">Last {studentResult.period} Days</p>
-                    <p className="text-2xl font-bold text-indigo-600">{studentResult.totalPasses}</p>
+                    <p className="text-xs text-gray-600 mb-1">
+                      Last {studentResult.period} Days
+                    </p>
+                    <p className="text-2xl font-bold text-indigo-600">
+                      {studentResult.totalPasses}
+                    </p>
                     <p className="text-xs text-gray-600">total passes</p>
                   </div>
                   <div className="bg-white p-3 rounded-lg">
                     <p className="text-xs text-gray-600 mb-1">Today</p>
-                    <p className="text-2xl font-bold text-orange-600">{studentResult.todayPasses}</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {studentResult.todayPasses}
+                    </p>
                     <p className="text-xs text-gray-600">passes</p>
                   </div>
                   <div className="bg-white p-3 rounded-lg">
                     <p className="text-xs text-gray-600 mb-1">Daily Avg</p>
                     <p className="text-2xl font-bold text-green-600">
-                      {(studentResult.totalPasses / studentResult.period).toFixed(1)}
+                      {(
+                        studentResult.totalPasses / studentResult.period
+                      ).toFixed(1)}
                     </p>
                     <p className="text-xs text-gray-600">per day</p>
                   </div>
@@ -1004,43 +1070,115 @@ const AnalyticsView = () => {
                     </h4>
 
                     {studentResult.passHistory.length === 0 ? (
-                      <p className="text-gray-500 text-sm">No pass history found</p>
+                      <p className="text-gray-500 text-sm text-center py-8">
+                        No pass history found
+                      </p>
                     ) : (
-                      <div className="space-y-2 max-h-96 overflow-y-auto">
-                        {studentResult.passHistory.map((pass, index) => (
-                          <div key={index} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="font-medium text-gray-900">
-                                {new Date(pass.date).toLocaleDateString("en-US", {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                })}
-                              </span>
-                              <span
-                                className={`px-2 py-1 rounded text-xs font-medium ${
-                                  pass.status === "OUT" ? "bg-orange-100 text-orange-700" : "bg-green-100 text-green-700"
-                                }`}
-                              >
-                                {pass.status === "OUT" ? "Currently Out" : "Completed"}
-                              </span>
-                            </div>
+                      <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                        {studentResult.passHistory.map((pass, index) => {
+                          const isOut = pass.status === "OUT";
 
-                            <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                              <div><span className="font-medium">From:</span> Room {pass.roomFrom}</div>
-                              <div><span className="font-medium">To:</span> {pass.destination}</div>
-                              <div><span className="font-medium">Out:</span> {pass.checkOutTime}</div>
-                              {pass.checkInTime && (
-                                <div><span className="font-medium">In:</span> {pass.checkInTime}</div>
-                              )}
-                              {pass.duration != null && (
-                                <div className="col-span-2">
-                                  <span className="font-medium">Duration:</span> {pass.duration} minutes
+                          return (
+                            <div
+                              key={index}
+                              className="bg-white border border-gray-200 rounded-2xl px-4 py-4 md:px-5 md:py-5 hover:shadow-sm"
+                            >
+                              <div className="flex items-center gap-4">
+                                {/* LEFT: avatar + name/ID */}
+                                <div className="flex items-center gap-4 min-w-0">
+                                  <div className="h-12 w-12 rounded-full bg-indigo-50 flex items-center justify-center shrink-0">
+                                    <User
+                                      size={22}
+                                      className="text-indigo-600"
+                                    />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="text-lg font-semibold text-gray-800 truncate">
+                                      {studentResult.name}
+                                    </div>
+                                    <div className="text-sm text-gray-500 truncate">
+                                      ID: {studentResult.studentId}
+                                    </div>
+                                  </div>
                                 </div>
-                              )}
+
+                                {/* MIDDLE: Date + From/To + Times */}
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm text-gray-500 mb-1">
+                                    {new Date(pass.date).toLocaleDateString(
+                                      "en-US",
+                                      {
+                                        weekday: "short",
+                                        month: "short",
+                                        day: "numeric",
+                                        year: "numeric",
+                                      }
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-gray-700 truncate">
+                                    <MapPin
+                                      size={16}
+                                      className="text-blue-500 shrink-0"
+                                    />
+                                    <span className="truncate">
+                                      From{" "}
+                                      <span className="font-semibold">
+                                        Room {pass.roomFrom}
+                                      </span>{" "}
+                                      to{" "}
+                                      <span className="font-semibold capitalize">
+                                        {pass.destination}
+                                      </span>
+                                    </span>
+                                  </div>
+                                  <div className="mt-1 text-sm text-gray-600 flex flex-wrap items-center gap-x-4 gap-y-1">
+                                    <span>
+                                      <span className="text-gray-500">
+                                        Out:
+                                      </span>{" "}
+                                      {pass.checkOutTime}
+                                    </span>
+                                    <span>
+                                      <span className="text-gray-500">In:</span>{" "}
+                                      {pass.checkInTime || "—"}
+                                    </span>
+                                    {pass.duration != null && (
+                                      <span>
+                                        <span className="text-gray-500">
+                                          Duration:
+                                        </span>{" "}
+                                        {pass.duration < 60
+                                          ? `${pass.duration} min`
+                                          : `${Math.floor(
+                                              pass.duration / 60
+                                            )}h ${pass.duration % 60}m`}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* RIGHT: Status pill */}
+                                <div className="flex items-center gap-3 shrink-0">
+                                  <span
+                                    className={
+                                      "inline-flex items-center gap-2 rounded-xl px-3 py-1 text-sm font-medium " +
+                                      (isOut
+                                        ? "bg-amber-100 text-amber-700"
+                                        : "bg-green-100 text-green-700")
+                                    }
+                                  >
+                                    {isOut ? (
+                                      <Clock size={16} />
+                                    ) : (
+                                      <CheckCircle size={16} />
+                                    )}
+                                    {isOut ? "Out" : "Checked in"}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1050,7 +1188,8 @@ const AnalyticsView = () => {
               <div className="flex items-center gap-3">
                 <AlertCircle size={20} className="text-yellow-600" />
                 <p className="text-sm text-gray-700">
-                  No student found matching "{studentResult.searchTerm}" in the last {days} days.
+                  No student found matching "{studentResult.searchTerm}" in the
+                  last {days} days.
                 </p>
               </div>
             )}
@@ -1060,14 +1199,18 @@ const AnalyticsView = () => {
 
       {/* PERIOD PICKER */}
       <div className="bg-white rounded-lg shadow-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Time Period</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Time Period
+        </h2>
         <div className="flex gap-2">
           {[7, 14, 30, 60, 90].map((d) => (
             <button
               key={d}
               onClick={() => setDays(d)}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                days === d ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                days === d
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
               {d} days
@@ -1078,7 +1221,9 @@ const AnalyticsView = () => {
 
       {/* THRESHOLDS */}
       <div className="bg-white rounded-lg shadow-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Filter Thresholds</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Filter Thresholds
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1114,21 +1259,28 @@ const AnalyticsView = () => {
       {/* FREQUENT USERS */}
       <div className="bg-white rounded-lg shadow-sm p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Students with {monthlyThreshold}+ Passes (Last {analytics.periodDays} Days)
+          Students with {monthlyThreshold}+ Passes (Last {analytics.periodDays}{" "}
+          Days)
         </h2>
-        {analytics.frequentUsers.filter((u) => u.count >= monthlyThreshold).length === 0 ? (
+        {analytics.frequentUsers.filter((u) => u.count >= monthlyThreshold)
+          .length === 0 ? (
           <p className="text-gray-500">No students meet this threshold</p>
         ) : (
           <div className="space-y-3">
             {analytics.frequentUsers
               .filter((u) => u.count >= monthlyThreshold)
               .map((user) => (
-                <div key={user.studentId} className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
+                <div
+                  key={user.studentId}
+                  className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg"
+                >
                   <div className="flex items-center gap-3">
                     <User size={20} className="text-yellow-600" />
                     <div>
                       <p className="font-medium text-gray-800">{user.name}</p>
-                      <p className="text-sm text-gray-600">ID: {user.studentId}</p>
+                      <p className="text-sm text-gray-600">
+                        ID: {user.studentId}
+                      </p>
                     </div>
                   </div>
                   <span className="text-lg font-semibold text-yellow-700">
@@ -1145,19 +1297,25 @@ const AnalyticsView = () => {
         <h2 className="text-lg font-semibold text-gray-800 mb-4">
           Students with {dailyThreshold}+ Passes Today
         </h2>
-        {analytics.dailyMultiple.filter((u) => u.count >= dailyThreshold).length === 0 ? (
+        {analytics.dailyMultiple.filter((u) => u.count >= dailyThreshold)
+          .length === 0 ? (
           <p className="text-gray-500">No students meet this threshold today</p>
         ) : (
           <div className="space-y-3">
             {analytics.dailyMultiple
               .filter((u) => u.count >= dailyThreshold)
               .map((user) => (
-                <div key={user.studentId} className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                <div
+                  key={user.studentId}
+                  className="flex items-center justify-between p-3 bg-red-50 rounded-lg"
+                >
                   <div className="flex items-center gap-3">
                     <AlertCircle size={20} className="text-red-600" />
                     <div>
                       <p className="font-medium text-gray-800">{user.name}</p>
-                      <p className="text-sm text-gray-600">ID: {user.studentId}</p>
+                      <p className="text-sm text-gray-600">
+                        ID: {user.studentId}
+                      </p>
                     </div>
                   </div>
                   <span className="text-lg font-semibold text-red-700">
@@ -1174,6 +1332,14 @@ const AnalyticsView = () => {
 
 // --- Main Dashboard Component ---
 const Dashboard = () => {
+  // Helper to get display destination
+  const getDisplayDestination = (pass) => {
+    if (pass.destination === "other" && pass.customDestination) {
+      return pass.customDestination;
+    }
+    return pass.destination;
+  };
+
   const { user } = useAuth();
   const userRole = user?.role;
   const userRoom = user?.room;
@@ -1197,7 +1363,6 @@ const Dashboard = () => {
         const uniqueRooms = [...new Set(rooms)].sort((a, b) =>
           a.toString().localeCompare(b.toString(), undefined, { numeric: true })
         );
-        console.log("✅ Loaded rooms:", uniqueRooms);
         setAllRooms(uniqueRooms);
       } catch (error) {
         console.error("Error fetching rooms:", error);
@@ -1209,29 +1374,17 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    console.log("🟢 Dashboard useEffect - isTabVisible:", isTabVisible);
 
     if (!isTabVisible) {
-      console.log("⏸️ Tab not visible, skipping subscription");
       return;
     }
 
-    console.log("▶️ Starting subscription setup...");
     setLoading(true);
 
     const unsubscribe = subscribeToActivePasses(
       ({ success, passes, error }) => {
-        console.log("📬 Dashboard received callback!");
-        console.log("   Success:", success);
-        console.log("   Passes:", passes);
-        console.log("   Error:", error);
 
         if (success) {
-          console.log(
-            "✅ Setting activePasses state with",
-            passes.length,
-            "passes"
-          );
           setActivePasses(passes);
         } else {
           console.error("❌ Subscription error:", error);
@@ -1240,10 +1393,7 @@ const Dashboard = () => {
       }
     );
 
-    console.log("✅ Subscription set up, returning unsubscribe function");
-
     return () => {
-      console.log("🔴 Cleaning up subscription");
       unsubscribe();
     };
   }, [isTabVisible]);
@@ -1277,18 +1427,15 @@ const Dashboard = () => {
     await signOut(); //
   };
 
-  // --- Memoized Filtered Passes (FIXED) ---
-  // This now handles ALL filtering on the client side
   const filteredPasses = useMemo(() => {
-    console.log("🔍 Filtering passes...");
-    console.log("   activePasses count:", activePasses.length);
-    console.log("   searchTerm:", searchTerm);
-    console.log("   filterRoom:", filterRoom);
-    console.log("   filterDestination:", filterDestination);
 
     const lowerSearchTerm = searchTerm.toLowerCase();
 
-    const filtered = activePasses.filter((pass) => {
+    // Split into FROM and TO when a specific room is selected
+    let fromPasses = [];
+    let toPasses = [];
+
+    activePasses.forEach((pass) => {
       // Filter 1: Search Term (Name or ID)
       if (searchTerm) {
         const nameMatch = pass.studentName
@@ -1296,42 +1443,47 @@ const Dashboard = () => {
           .includes(lowerSearchTerm);
         const idMatch = pass.studentId?.includes(lowerSearchTerm);
         if (!nameMatch && !idMatch) {
-          console.log("   ❌ Pass filtered out by search:", pass.studentName);
-          return false;
+          return; // Skip this pass
         }
       }
 
-      // Filter 2: Room
-      if (filterRoom) {
-        if (pass.roomFrom !== filterRoom) {
-          console.log(
-            "   ❌ Pass filtered out by room:",
-            pass.roomFrom,
-            "vs",
-            filterRoom
-          );
-          return false;
-        }
-      }
-
-      // Filter 3: Destination
+      // Filter 3: Destination filter (applies to all)
       if (filterDestination) {
         const lowerDest = filterDestination.toLowerCase();
-        if (
-          !pass.destination?.toLowerCase().includes(lowerDest) &&
-          !pass.customDestination?.toLowerCase().includes(lowerDest)
-        ) {
-          console.log("   ❌ Pass filtered out by destination");
-          return false;
+        const actualDest =
+          pass.destination === "other" && pass.customDestination
+            ? pass.customDestination
+            : pass.destination;
+
+        if (!actualDest?.toLowerCase().includes(lowerDest)) {
+          return; // Skip this pass
         }
       }
 
-      console.log("   ✅ Pass included:", pass.studentName);
-      return true;
+      // Filter 2: Room filter - split into FROM and TO
+      if (filterRoom) {
+        // Check if FROM this room
+        if (pass.roomFrom === filterRoom) {
+          fromPasses.push(pass);
+        }
+
+        // Check if TO this room (destination matches room or staff name)
+        const actualDest =
+          pass.destination === "other" && pass.customDestination
+            ? pass.customDestination
+            : pass.destination;
+
+        // Check if destination contains the room number or staff name
+        if (actualDest?.toLowerCase().includes(filterRoom.toLowerCase())) {
+          toPasses.push(pass);
+        }
+      } else {
+        // No room filter - show all in one list
+        fromPasses.push(pass);
+      }
     });
 
-    console.log("✅ Final filtered passes count:", filtered.length);
-    return filtered;
+    return { fromPasses, toPasses, hasRoomFilter: !!filterRoom };
   }, [activePasses, searchTerm, filterRoom, filterDestination]);
 
   return (
@@ -1456,63 +1608,139 @@ const Dashboard = () => {
 
         {/* --- Content based on view --- */}
         {view === "active" ? (
-          <div className="bg-white rounded-lg shadow-sm border">
-            {loading && filteredPasses.length === 0 && (
-              <p className="text-center p-12">Loading...</p>
-            )}
-            {!loading && filteredPasses.length === 0 && (
-              <p className="text-center p-12">No active passes found.</p>
-            )}
-            {filteredPasses.length > 0 && (
-              <div className="divide-y">
-                {filteredPasses.map((pass) => (
-                  <div
-                    key={pass.id}
-                    className="p-4 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="bg-indigo-100 text-indigo-700 p-3 rounded-full">
-                        <User size={24} />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold">
-                          {pass.studentName || "Name Missing"}
-                        </h3>
-                        <p className="text-sm text-gray-500">
-                          ID: {pass.studentId || "ID Missing"}
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-1 text-sm text-gray-600">
-                        <div className="flex items-center gap-2">
-                          <MapPin size={16} className="text-blue-500" />
-                          <span>
-                            From <strong>Room {pass.roomFrom}</strong> to{" "}
-                            <strong className="capitalize">
-                              {pass.destination}
-                            </strong>
-                          </span>
-                        </div>
-                        <div
-                          className={`flex items-center gap-1 ${getTimeColor(
-                            pass.checkOutTime
-                          )}`}
-                        >
-                          <Clock size={16} />
-                          <span>{getTimeSince(pass.checkOutTime)}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleCheckIn(pass.id, pass.studentName)}
-                      className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
-                    >
-                      <CheckCircle size={18} />
-                      Check In
-                    </button>
-                  </div>
-                ))}
+          <div className="space-y-6">
+            {/* FROM Section */}
+            <div className="bg-white rounded-lg shadow-sm border">
+              <div className="px-6 py-4 border-b flex items-center justify-between bg-blue-50">
+                <h2 className="text-lg font-semibold text-gray-800">
+                  {filteredPasses.hasRoomFilter
+                    ? `FROM Room ${filterRoom} (${filteredPasses.fromPasses.length})`
+                    : `Currently Out of Class (${filteredPasses.fromPasses.length})`}
+                </h2>
               </div>
-            )}
+
+              {loading && filteredPasses.fromPasses.length === 0 && (
+                <p className="text-center p-12">Loading...</p>
+              )}
+              {!loading && filteredPasses.fromPasses.length === 0 && (
+                <p className="text-center p-12">
+                  {filteredPasses.hasRoomFilter
+                    ? `No students currently out from Room ${filterRoom}`
+                    : "No active passes found"}
+                </p>
+              )}
+              {filteredPasses.fromPasses.length > 0 && (
+                <div className="divide-y">
+                  {filteredPasses.fromPasses.map((pass) => (
+                    <div
+                      key={pass.id}
+                      className="p-4 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="bg-indigo-100 text-indigo-700 p-3 rounded-full">
+                          <User size={24} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold">
+                            {pass.studentName || "Name Missing"}
+                          </h3>
+                          <p className="text-sm text-gray-500">
+                            ID: {pass.studentId || "ID Missing"}
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-1 text-sm text-gray-600">
+                          <div className="flex items-center gap-2">
+                            <MapPin size={16} className="text-blue-500" />
+                            <span>
+                              From <strong>Room {pass.roomFrom}</strong> to{" "}
+                              <strong className="capitalize">
+                                {getDisplayDestination(pass)}
+                              </strong>
+                            </span>
+                          </div>
+                          <div
+                            className={`flex items-center gap-1 ${getTimeColor(
+                              pass.checkOutTime
+                            )}`}
+                          >
+                            <Clock size={16} />
+                            <span>{getTimeSince(pass.checkOutTime)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleCheckIn(pass.id, pass.studentName)}
+                        className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
+                      >
+                        <CheckCircle size={18} />
+                        Check In
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* TO Section - Only show if room filter is active */}
+            {filteredPasses.hasRoomFilter &&
+              filteredPasses.toPasses.length > 0 && (
+                <div className="bg-white rounded-lg shadow-sm border">
+                  <div className="px-6 py-4 border-b flex items-center justify-between bg-green-50">
+                    <h2 className="text-lg font-semibold text-gray-800">
+                      TO Room {filterRoom} ({filteredPasses.toPasses.length})
+                    </h2>
+                  </div>
+
+                  <div className="divide-y">
+                    {filteredPasses.toPasses.map((pass) => (
+                      <div
+                        key={pass.id}
+                        className="p-4 flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="bg-green-100 text-green-700 p-3 rounded-full">
+                            <User size={24} />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold">
+                              {pass.studentName || "Name Missing"}
+                            </h3>
+                            <p className="text-sm text-gray-500">
+                              ID: {pass.studentId || "ID Missing"}
+                            </p>
+                          </div>
+                          <div className="flex flex-col gap-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-2">
+                              <MapPin size={16} className="text-green-500" />
+                              <span>
+                                From <strong>Room {pass.roomFrom}</strong>{" "}
+                                coming here
+                              </span>
+                            </div>
+                            <div
+                              className={`flex items-center gap-1 ${getTimeColor(
+                                pass.checkOutTime
+                              )}`}
+                            >
+                              <Clock size={16} />
+                              <span>{getTimeSince(pass.checkOutTime)}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleCheckIn(pass.id, pass.studentName)
+                          }
+                          className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
+                        >
+                          <CheckCircle size={18} />
+                          Check In
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
           </div>
         ) : view === "today" ? (
           <TodayView userRole={userRole} userRoom={userRoom} />
