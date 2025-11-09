@@ -181,6 +181,7 @@ export async function checkInPass(passId) {
 }
 // src/firebase/db.js
 
+// Subscribe to active passes (real-time) - KEEP TIMESTAMPS
 export const subscribeToActivePasses = (callback, filters = {}) => {
   try {
     const q = query(
@@ -196,9 +197,10 @@ export const subscribeToActivePasses = (callback, filters = {}) => {
           const data = d.data() || {};
           return {
             id: d.id,
-            // IMPORTANT: spread so we don’t drop fields like customDestination
+            // Spread all data to keep customDestination and other fields
             ...data,
-            // Keep Timestamps as-is for UI helpers that accept them
+            // Keep Timestamps as-is (DON'T convert to ISO)
+            // timeHelpers.js now handles both Timestamps and ISO strings
             checkOutTime: data.checkOutTime ?? null,
             checkInTime: data.checkInTime ?? null,
           };
@@ -206,14 +208,14 @@ export const subscribeToActivePasses = (callback, filters = {}) => {
         callback({ success: true, passes });
       },
       (err) => {
-        console.error("subscribeToActivePasses onSnapshot error:", err);
+        console.error("subscribeToActivePasses error:", err);
         callback({ success: false, error: String(err), passes: [] });
       }
     );
 
     return unsub;
   } catch (err) {
-    console.error("subscribeToActivePasses error:", err);
+    console.error("subscribeToActivePasses setup error:", err);
     return () => {};
   }
 };

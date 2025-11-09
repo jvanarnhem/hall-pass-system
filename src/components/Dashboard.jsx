@@ -39,15 +39,6 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase/config";
 
-// Debug helper: enable by running `localStorage.setItem('hp_debug','1')` in the console.
-// Disable with `localStorage.removeItem('hp_debug')`.
-const HP_DEBUG =
-  process.env.NODE_ENV !== "production" &&
-  localStorage.getItem("hp_debug") === "1";
-const dlog = (...args) => {
-  if (HP_DEBUG) console.log("[HallPass]", ...args);
-};
-
 // --- EditPassDialog Component (from your file) ---
 const EditPassDialog = ({ pass, onClose, onSave }) => {
   //

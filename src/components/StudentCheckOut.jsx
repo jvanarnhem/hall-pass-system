@@ -1,25 +1,19 @@
 // src/components/StudentCheckOut.jsx
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom"; // Import Link
-import { useAuth } from "../hooks/useAuth"; // Import our new hook
+import { Link } from "react-router-dom";
 import { LogOut, AlertCircle, CheckCircle, RefreshCw } from "lucide-react";
 import { TIMEOUTS } from "../constants";
-// --- ADD THESE IMPORTS BACK ---
 import {
   getStudent,
   getDestinations,
   getSystemSettings,
   createCheckout,
 } from "../firebase/db";
-// ------------------------------
-import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
+import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 const StudentCheckOut = ({ roomNumber }) => {
-  // Use the central auth state
-  const { user, authLoading } = useAuth();
-
-  // --- ADD ALL YOUR STATE VARIABLES BACK ---
+  // State variables
   const [systemSettings, setSystemSettings] = useState(null);
   const [checkoutBlocked, setCheckoutBlocked] = useState(false);
   const [blockReason, setBlockReason] = useState("");
@@ -33,9 +27,8 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [staffList, setStaffList] = useState([]);
   const [filteredStaff, setFilteredStaff] = useState([]);
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
-  // ------------------------------------------
 
-  // --- Helper Function ---
+  // Helper Function
   const checkIfCheckoutAllowed = (settings) => {
     const now = new Date();
 
@@ -61,60 +54,48 @@ const StudentCheckOut = ({ roomNumber }) => {
     return true;
   };
 
-  // --- Auth & Data Loading Effect ---
+  // Load data on mount - NO AUTH REQUIRED
   useEffect(() => {
-    // We must wait for the auth check to finish
-    if (authLoading) {
-      return; // Still checking who the user is
-    }
-
-    if (user) {
-      // --- User is logged in ---
-      // Now we can safely load all data
-      const loadData = async () => {
-        try {
-          // Load destinations
-          const destResult = await getDestinations();
-          if (destResult.success && destResult.destinations) {
-            const destNames = destResult.destinations.map((d) => d.name);
-            setDestinations(destNames);
-          } else {
-            setDestinations(["Restroom", "Nurse", "Guidance", "Other"]);
-          }
-
-          // Load staff for "Other" dropdown
-          const staffQuery = query(
-            collection(db, "staff"),
-            where("active", "==", true),
-            orderBy("name")
-          );
-          const staffSnapshot = await getDocs(staffQuery);
-          const staff = staffSnapshot.docs.map(
-            (doc) => doc.data().dropdownText
-          );
-          setStaffList(staff);
-          setFilteredStaff(staff);
-          console.log("Loaded staff:", staff.length);
-
-          // Load system settings
-          const settingsResult = await getSystemSettings();
-          if (settingsResult.success) {
-            setSystemSettings(settingsResult.settings);
-            checkIfCheckoutAllowed(settingsResult.settings);
-          }
-        } catch (error) {
-          console.error("Error during data load:", error);
+    const loadData = async () => {
+      try {
+        // Load destinations
+        const destResult = await getDestinations();
+        if (destResult.success && destResult.destinations) {
+          const destNames = destResult.destinations.map((d) => d.name);
+          setDestinations(destNames);
+        } else {
+          setDestinations(["Restroom", "Nurse", "Guidance", "Other"]);
         }
-      };
 
-      loadData();
-    } else {
-      // --- User is not logged in ---
-      // (We could load public data like destinations here if we wanted)
-    }
-  }, [user, authLoading]); // Run this effect when auth state changes
+        // Load staff - NO orderBy to avoid composite index requirement
+        const staffQuery = query(
+          collection(db, "staff"),
+          where("active", "==", true)
+        );
+        const staffSnapshot = await getDocs(staffQuery);
+        const staffData = staffSnapshot.docs.map((doc) => doc.data());
+        
+        // Sort in JavaScript instead of Firestore
+        staffData.sort((a, b) => a.name.localeCompare(b.name));
+        
+        const staff = staffData.map((s) => s.dropdownText || s.name);
+        setStaffList(staff);
+        setFilteredStaff(staff);
 
-  // --- ADD ALL YOUR HELPER FUNCTIONS BACK ---
+        // Load system settings
+        const settingsResult = await getSystemSettings();
+        if (settingsResult.success) {
+          setSystemSettings(settingsResult.settings);
+          checkIfCheckoutAllowed(settingsResult.settings);
+        }
+      } catch (error) {
+        console.error("Error loading data:", error);
+      }
+    };
+
+    loadData();
+  }, []);
+
   const handleStaffSearch = (searchText) => {
     setCustomDestination(searchText);
 
@@ -135,10 +116,8 @@ const StudentCheckOut = ({ roomNumber }) => {
   };
 
   const handleSubmit = async () => {
-    // Prevent double-submission
     if (submitting) return;
 
-    // Check if checkout is blocked
     if (checkoutBlocked) {
       setStatus({
         type: "error",
@@ -147,7 +126,6 @@ const StudentCheckOut = ({ roomNumber }) => {
       return;
     }
 
-    // Validate inputs
     if (studentId.length !== 6) {
       setStatus({ type: "error", message: "Student ID must be 6 digits" });
       return;
@@ -163,13 +141,12 @@ const StudentCheckOut = ({ roomNumber }) => {
       return;
     }
 
-    // Start loading
     setLoading(true);
     setSubmitting(true);
     setStatus(null);
 
     try {
-      // Step 1: Verify student exists
+      // Verify student exists
       const studentCheck = await getStudent(studentId);
 
       if (!studentCheck.success || !studentCheck.student) {
@@ -182,16 +159,15 @@ const StudentCheckOut = ({ roomNumber }) => {
         return;
       }
 
-      // Step 3: Actually create the checkout
+      // Create checkout
       const result = await createCheckout(
         studentId,
-        studentCheck.student.name, // <-- ADD THIS
+        studentCheck.student.name,
         destination,
         roomNumber,
         destination === "other" ? customDestination : null
       );
 
-      // Step 4: Check if it succeeded
       if (!result.success) {
         setStatus({
           type: "error",
@@ -211,14 +187,13 @@ const StudentCheckOut = ({ roomNumber }) => {
         message: `${studentCheck.student.name} checked out successfully. Please proceed to ${finalDestination}.`,
       });
 
-      // Clear the form
+      // Clear form
       setStudentId("");
       setDestination("");
       setCustomDestination("");
       setLoading(false);
       setSubmitting(false);
 
-      // Clear success message
       setTimeout(() => {
         setStatus(null);
       }, TIMEOUTS.SUCCESS_MESSAGE);
@@ -238,53 +213,7 @@ const StudentCheckOut = ({ roomNumber }) => {
       handleSubmit();
     }
   };
-  // ------------------------------------------
 
-  // --- Render Logic ---
-  if (authLoading) {
-    // This is the new "isLoading"
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        Loading...
-      </div>
-    );
-  }
-
-  if (!user) {
-    // Show login prompt if not authenticated
-    return (
-      <div
-        style={{
-          padding: "2rem",
-          textAlign: "center",
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <h2>Welcome to the Hall Pass System</h2>
-        <p>Please log in with your @ofcs.net account to continue.</p>
-        <Link
-          to="/login"
-          style={{
-            fontSize: "1.2rem",
-            padding: "0.5rem 1rem",
-            marginTop: "1rem",
-            backgroundColor: "#4f46e5",
-            color: "white",
-            textDecoration: "none",
-            borderRadius: "0.5rem",
-          }}
-        >
-          Sign in with Google
-        </Link>
-      </div>
-    );
-  }
-
-  // Main component render (if logged in)
   return (
     <div
       className="min-h-screen flex items-center justify-center p-4"
@@ -292,17 +221,14 @@ const StudentCheckOut = ({ roomNumber }) => {
         background: "linear-gradient(to bottom right, #f0f4ff, #d9e5ff)",
       }}
     >
-      {/* --- ADD THIS LINK FOR STAFF --- */}
-      {user.role && (
-        <Link
-          to="/dashboard"
-          className="fixed top-4 right-4 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 shadow-lg z-50"
-        >
-          Staff Dashboard →
-        </Link>
-      )}
+      {/* Staff Login Link - Always visible */}
+      <Link
+        to="/login"
+        className="fixed top-4 right-4 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 shadow-lg z-50"
+      >
+        Staff Login →
+      </Link>
 
-      {/* --- THE REST OF YOUR COMPONENT --- */}
       <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
         <div className="text-center mb-6">
           <div
