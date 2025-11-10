@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { signOut } from "../firebase/auth";
+import AdminPanel from "./AdminPanel";
 import {
   Search,
   BarChart3,
@@ -1629,6 +1630,19 @@ const Dashboard = () => {
                 >
                   Analytics
                 </button>
+                {/* ADD THIS ADMIN BUTTON: */}
+                {userRole === "admin" && (
+                  <button
+                    onClick={() => setView("admin")}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      view === "admin"
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    Admin
+                  </button>
+                )}
               </div>
               {/* Nav Links */}
               <div className="flex items-center gap-2 border-l pl-4">
@@ -1838,9 +1852,11 @@ const Dashboard = () => {
           </div>
         ) : view === "today" ? (
           <TodayView userRole={userRole} userRoom={userRoom} />
-        ) : (
+        ) : view === "analytics" ? (
           <AnalyticsView />
-        )}
+        ) : view === "admin" ? (
+          <AdminPanel />
+        ) : null}
       </div>
     </div>
   );
