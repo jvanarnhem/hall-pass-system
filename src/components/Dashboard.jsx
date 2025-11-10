@@ -1,5 +1,5 @@
 // src/components/Dashboard.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { signOut } from "../firebase/auth";
@@ -40,6 +40,28 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "../firebase/config";
+
+// Simple cache for TodayView
+const todayPassesCache = {
+  data: null,
+  timestamp: null,
+  isValid() {
+    if (!this.data || !this.timestamp) return false;
+    const age = Date.now() - this.timestamp;
+    return age < 2 * 60 * 1000; // Cache valid for 2 minutes
+  },
+  set(data) {
+    this.data = data;
+    this.timestamp = Date.now();
+  },
+  get() {
+    return this.isValid() ? this.data : null;
+  },
+  clear() {
+    this.data = null;
+    this.timestamp = null;
+  },
+};
 
 // --- EditPassDialog Component (from your file) ---
 const EditPassDialog = ({ pass, onClose, onSave }) => {
@@ -193,6 +215,24 @@ const TodayView = ({ userRole, userRoom }) => {
   // Edit modal
   const [editingPass, setEditingPass] = useState(null);
 
+  // ===== Cache (component-level) =====
+  const cacheRef = useRef({
+    data: null,
+    timestamp: null,
+  });
+
+  const isCacheValid = () => {
+    if (!cacheRef.current.data || !cacheRef.current.timestamp) return false;
+    const age = Date.now() - cacheRef.current.timestamp;
+    return age < 2 * 60 * 1000; // 2 minutes
+  };
+
+  const clearCache = () => {
+    cacheRef.current.data = null;
+    cacheRef.current.timestamp = null;
+    console.log("🗑️ TodayView cache cleared");
+  };
+
   // ===== helpers =====
   const norm = (v) =>
     String(v ?? "")
@@ -264,6 +304,15 @@ const TodayView = ({ userRole, userRoom }) => {
 
   // ===== fetch: OUT today (active) + IN today (history) + OUT today (history created today) =====
   const fetchTodayPasses = async () => {
+    // Check cache first
+    if (isCacheValid()) {
+      console.log("📦 Using cached today passes");
+      setPasses(cacheRef.current.data);
+      setLoading(false);
+      return;
+    }
+
+    console.log("🔄 Fetching fresh today passes from Firestore");
     setLoading(true);
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -310,13 +359,13 @@ const TodayView = ({ userRole, userRoom }) => {
 
       // Build rows
       snapA.docs.forEach((d) => rows.push(toRow(d, "active")));
-      snapHIn.docs.forEach((d) => rows.push(toRow(d, "history"))); // ← unify as "history"
-      snapHOutToday.docs.forEach((d) => rows.push(toRow(d, "history"))); // ← unify as "history"
+      snapHIn.docs.forEach((d) => rows.push(toRow(d, "history")));
+      snapHOutToday.docs.forEach((d) => rows.push(toRow(d, "history")));
 
-      // De-dupe by collection + id (so the same history doc from two queries keeps only one)
+      // De-dupe by collection + id
       const byKey = new Map();
       for (const r of rows) {
-        const key = `${r.source}:${r.id}`; // "active:docId" or "history:docId"
+        const key = `${r.source}:${r.id}`;
         if (!byKey.has(key)) byKey.set(key, r);
       }
 
@@ -331,6 +380,11 @@ const TodayView = ({ userRole, userRoom }) => {
       });
 
       setPasses(merged);
+
+      // ✅ Cache the results
+      cacheRef.current.data = merged;
+      cacheRef.current.timestamp = Date.now();
+      console.log("💾 Today passes cached");
     } catch (e) {
       console.error("fetchTodayPasses error:", e);
     } finally {
@@ -402,6 +456,9 @@ const TodayView = ({ userRole, userRoom }) => {
 
       await updateDoc(ref, patch);
       setEditingPass(null);
+
+      // ✅ Clear cache and refetch
+      clearCache();
       fetchTodayPasses();
     } catch (err) {
       console.error("Edit save error:", err);
@@ -409,10 +466,13 @@ const TodayView = ({ userRole, userRoom }) => {
     }
   };
 
-  // ===== check-in handler for OUT rows (same as Active behavior) =====
+  // ===== check-in handler for OUT rows =====
   const handleCheckIn = async (row) => {
     try {
       await checkInPass(row.id);
+
+      // ✅ Clear cache and refetch
+      clearCache();
       fetchTodayPasses();
     } catch (err) {
       console.error("Check-in error:", err);
@@ -615,9 +675,26 @@ const AnalyticsView = () => {
   const [studentResult, setStudentResult] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
 
-  useEffect(() => {
-    loadAnalytics();
-  }, [days]);
+  // ===== Cache (component-level) =====
+  const cacheRef = useRef({
+    data: null,
+    days: null,
+    timestamp: null,
+  });
+
+  const isCacheValid = (currentDays) => {
+    if (!cacheRef.current.data || !cacheRef.current.timestamp) return false;
+    if (cacheRef.current.days !== currentDays) return false; // Different day range
+    const age = Date.now() - cacheRef.current.timestamp;
+    return age < 5 * 60 * 1000; // 5 minutes (longer than Today view since data changes less frequently)
+  };
+
+  const clearCache = () => {
+    cacheRef.current.data = null;
+    cacheRef.current.days = null;
+    cacheRef.current.timestamp = null;
+    console.log("🗑️ AnalyticsView cache cleared");
+  };
 
   // Helpers
   const startOfToday = () => {
@@ -655,7 +732,7 @@ const AnalyticsView = () => {
       name: x.studentName || "",
       roomFrom: x.roomFrom != null ? String(x.roomFrom) : "",
       destination: x.destination || "",
-      customDestination: x.customDestination || null, // ← ADD THIS LINE
+      customDestination: x.customDestination || null,
       createdAtISO: createdISO,
       checkOutISO: outISO,
       checkInISO: inISO,
@@ -666,6 +743,15 @@ const AnalyticsView = () => {
 
   // Load all analytics for period + today
   const loadAnalytics = async () => {
+    // Check cache first
+    if (isCacheValid(days)) {
+      console.log(`📦 Using cached analytics for ${days} days`);
+      setAnalytics(cacheRef.current.data);
+      setLoading(false);
+      return;
+    }
+
+    console.log(`🔄 Fetching fresh analytics from Firestore (${days} days)`);
     setLoading(true);
     try {
       const since = periodStart(days);
@@ -769,7 +855,14 @@ const AnalyticsView = () => {
         (a, b) => b.count - a.count
       );
 
-      setAnalytics({ frequentUsers, dailyMultiple, periodDays: days });
+      const analyticsData = { frequentUsers, dailyMultiple, periodDays: days };
+      setAnalytics(analyticsData);
+
+      // ✅ Cache the results
+      cacheRef.current.data = analyticsData;
+      cacheRef.current.days = days;
+      cacheRef.current.timestamp = Date.now();
+      console.log(`💾 Analytics cached for ${days} days`);
     } catch (err) {
       console.error("Error loading analytics:", err);
       setAnalytics(null);
@@ -778,6 +871,9 @@ const AnalyticsView = () => {
     }
   };
 
+  useEffect(() => {
+    loadAnalytics();
+  }, [days]);
   // Student lookup
   const handleStudentSearch = async () => {
     if (!studentSearch.trim()) {
@@ -880,7 +976,7 @@ const AnalyticsView = () => {
         return {
           date: r.createdAtISO || r.checkOutISO || r.checkInISO,
           roomFrom: r.roomFrom,
-          destination: displayDestination, // ← Use calculated display destination
+          destination: displayDestination,
           checkOutTime: r.checkOutISO
             ? new Date(r.checkOutISO).toLocaleTimeString("en-US", {
                 hour: "numeric",
