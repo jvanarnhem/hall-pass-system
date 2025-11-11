@@ -70,32 +70,42 @@ function parseCSV(csvText) {
       continue;
     }
 
-    // Parse dates
-    // === NEW, REVISED CODE ===
-    // This new parseDate function will correctly read "MM/DD/YY HH:MM"
+    // === NEW, REVISED CODE v2 ===
+    // This new parseDate function handles "MM/DD/YY HH:MM" and "MM/DD/YY HH:MM AM/PM"
     const parseDate = (dateStr) => {
+      console.log(`|${dateStr}|`); // <-- ADD THIS LINE
       if (!dateStr) return null;
 
-      // Regex to match "MM/DD/YY HH:MM"
+      // Regex to match "MM/DD/YY HH:MM" (with optional AM/PM, case-insensitive)
       const match = dateStr.match(
-        /^(\d{1,2})\/(\d{1,2})\/(\d{2})\s(\d{1,2}):(\d{2})$/
+        /^(\d{1,2})\/(\d{1,2})\/(\d{2})\s(\d{1,2}):(\d{2})(\s(AM|PM))?$/i
       );
 
       if (match) {
-        // We have a match! Build the date manually.
-        // match[1] = MM, match[2] = DD, match[3] = YY, match[4] = HH, match[5] = MM
+        // match[1] = MM, match[2] = DD, match[3] = YY
+        // match[4] = HH, match[5] = MM
+        // match[7] = AM/PM (or undefined)
 
         const month = parseInt(match[1], 10) - 1; // 0-indexed month
         const day = parseInt(match[2], 10);
         const year = parseInt(match[3], 10) + 2000; // '25' -> 2025
-        const hour = parseInt(match[4], 10);
+        let hour = parseInt(match[4], 10);
         const minute = parseInt(match[5], 10);
+        const ampm = match[7] ? match[7].toUpperCase() : null;
+
+        // Adjust hour for AM/PM
+        if (ampm === "PM" && hour < 12) {
+          hour += 12;
+        }
+        if (ampm === "AM" && hour === 12) {
+          hour = 0; // Midnight case (12 AM)
+        }
 
         const d = new Date(year, month, day, hour, minute);
         return isNaN(d.getTime()) ? null : d; // Check if it's a valid date
       }
 
-      // Fallback for other formats (like just "15:20", which will fail)
+      // Fallback for other formats (like "15:20", which will fail)
       const d = new Date(dateStr);
       return isNaN(d.getTime()) ? null : d;
     };

@@ -74,10 +74,10 @@ const StudentCheckOut = ({ roomNumber }) => {
         );
         const staffSnapshot = await getDocs(staffQuery);
         const staffData = staffSnapshot.docs.map((doc) => doc.data());
-        
+
         // Sort in JavaScript instead of Firestore
         staffData.sort((a, b) => a.name.localeCompare(b.name));
-        
+
         const staff = staffData.map((s) => s.dropdownText || s.name);
         setStaffList(staff);
         setFilteredStaff(staff);
@@ -116,7 +116,11 @@ const StudentCheckOut = ({ roomNumber }) => {
   };
 
   const handleSubmit = async () => {
-    if (submitting) return;
+    // ✅ Prevent double submission at the very start
+    if (submitting || loading) {
+      console.log("⚠️ Already submitting, ignoring duplicate click");
+      return;
+    }
 
     if (checkoutBlocked) {
       setStatus({
@@ -141,11 +145,30 @@ const StudentCheckOut = ({ roomNumber }) => {
       return;
     }
 
+    // ✅ Set both states immediately to block any further clicks
     setLoading(true);
     setSubmitting(true);
     setStatus(null);
 
     try {
+      // ✅ Add server-side duplicate check
+      const activePassesQuery = query(
+        collection(db, "activePasses"),
+        where("studentId", "==", studentId),
+        where("status", "==", "OUT")
+      );
+      const activePassesSnapshot = await getDocs(activePassesQuery);
+
+      if (!activePassesSnapshot.empty) {
+        setStatus({
+          type: "error",
+          message: "You already have an active pass. Please check in first.",
+        });
+        setLoading(false);
+        setSubmitting(false);
+        return;
+      }
+
       // Verify student exists
       const studentCheck = await getStudent(studentId);
 
@@ -191,8 +214,6 @@ const StudentCheckOut = ({ roomNumber }) => {
       setStudentId("");
       setDestination("");
       setCustomDestination("");
-      setLoading(false);
-      setSubmitting(false);
 
       setTimeout(() => {
         setStatus(null);
@@ -203,6 +224,8 @@ const StudentCheckOut = ({ roomNumber }) => {
         type: "error",
         message: "System error. Please contact your teacher.",
       });
+    } finally {
+      // ✅ Always reset states in finally block
       setLoading(false);
       setSubmitting(false);
     }

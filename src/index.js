@@ -1,10 +1,12 @@
 // src/index.js
 import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom"; // Import the router
-import { AuthProvider } from "./hooks/useAuth"; // Import our provider
+import { BrowserRouter } from "react-router-dom";
+import { AuthProvider } from "./hooks/useAuth";
+import { QueryClientProvider } from "@tanstack/react-query"; // ✅ ADD THIS
+import { queryClient } from "./queryClient"; // ✅ ADD THIS
 import App from "./App";
-import "./index.css"; // Your styles
+import "./index.css";
 
 /**
  * Minimal Error Boundary (Your existing code, no changes)
@@ -97,17 +99,18 @@ const container = document.getElementById("root");
 const root = createRoot(container);
 
 /**
- * This is the part to fix.
- * We wrap the <App> component in <BrowserRouter> and <AuthProvider>.
+ * Wrap with QueryClientProvider for React Query caching
  */
 root.render(
   <StrictMode>
-    <BrowserRouter> {/* This provides the "Router" context */}
-      <AuthProvider> {/* This provides the "Auth" context */}
-        <ErrorBoundary>
-          <App />
-        </ErrorBoundary>
-      </AuthProvider>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}> {/* ✅ ADD THIS WRAPPER */}
+      <BrowserRouter>
+        <AuthProvider>
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
+        </AuthProvider>
+      </BrowserRouter>
+    </QueryClientProvider> {/* ✅ ADD THIS CLOSING TAG */}
   </StrictMode>
 );
