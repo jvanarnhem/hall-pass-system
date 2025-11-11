@@ -1,5 +1,5 @@
 // src/components/AdminPanel.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Upload,
   Download,
@@ -11,8 +11,6 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle,
-  Trash2,
-  Edit,
 } from 'lucide-react';
 import {
   collection,
@@ -29,18 +27,28 @@ import {
 import { db } from '../firebase/config';
 import { COLLECTIONS } from '../firebase/db';
 import { parseCSV, exportToCSV, formatDateForCSV } from '../utils/csvHelpers';
+import { 
+  useStaffList, 
+  useStudentCount, 
+  useExportCount,
+  useInvalidateQueries 
+} from '../hooks/usePassQueries';
 
 const AdminPanel = () => {
   const [expandedSection, setExpandedSection] = useState('export');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
 
+  // React Query hooks
+  const { data: staff = [], isLoading: staffLoading } = useStaffList();
+  const { data: studentCount = 0, isLoading: studentCountLoading } = useStudentCount();
+  const { invalidateStaff, invalidateStudents, invalidateExport } = useInvalidateQueries();
+
   // Export state
   const [exportDays, setExportDays] = useState(30);
-  const [exportCount, setExportCount] = useState(null);
+  const { data: exportCount = null, isLoading: exportCountLoading } = useExportCount(exportDays);
 
   // Staff state
-  const [staff, setStaff] = useState([]);
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [newStaff, setNewStaff] = useState({
     email: '',
@@ -50,41 +58,11 @@ const AdminPanel = () => {
   });
 
   // Student state
-  const [studentCount, setStudentCount] = useState(0);
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [newStudent, setNewStudent] = useState({
     id: '',
     name: '',
   });
-
-  // Load initial data
-  useEffect(() => {
-    loadStaff();
-    loadStudentCount();
-  }, []);
-
-  const loadStaff = async () => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.STAFF));
-      const staffData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      staffData.sort((a, b) => a.name.localeCompare(b.name));
-      setStaff(staffData);
-    } catch (error) {
-      console.error('Error loading staff:', error);
-    }
-  };
-
-  const loadStudentCount = async () => {
-    try {
-      const snapshot = await getDocs(collection(db, COLLECTIONS.STUDENTS));
-      setStudentCount(snapshot.size);
-    } catch (error) {
-      console.error('Error loading student count:', error);
-    }
-  };
 
   const showMessage = (type, text) => {
     setMessage({ type, text });
@@ -94,34 +72,6 @@ const AdminPanel = () => {
   // ============================================
   // EXPORT FUNCTIONS
   // ============================================
-
-  const calculateExportCount = async () => {
-    try {
-      let q;
-      
-      if (exportDays === 'all') {
-        q = collection(db, COLLECTIONS.PASS_HISTORY);
-      } else {
-        const since = new Date();
-        since.setDate(since.getDate() - exportDays);
-        since.setHours(0, 0, 0, 0);
-        
-        q = query(
-          collection(db, COLLECTIONS.PASS_HISTORY),
-          where('createdAt', '>=', Timestamp.fromDate(since))
-        );
-      }
-      
-      const snapshot = await getDocs(q);
-      setExportCount(snapshot.size);
-    } catch (error) {
-      console.error('Error calculating export count:', error);
-    }
-  };
-
-  useEffect(() => {
-    calculateExportCount();
-  }, [exportDays]);
 
   const handleExport = async () => {
     setLoading(true);
@@ -254,7 +204,7 @@ const AdminPanel = () => {
       await batch.commit();
       
       showMessage('success', `${action}: ${data.length} staff members processed`);
-      loadStaff();
+      invalidateStaff(); // ✅ Invalidate cache
       
     } catch (error) {
       console.error('Error importing staff:', error);
@@ -293,7 +243,7 @@ const AdminPanel = () => {
       showMessage('success', `Added ${newStaff.name} successfully`);
       setNewStaff({ email: '', name: '', room: '', role: 'teacher' });
       setShowAddStaff(false);
-      loadStaff();
+      invalidateStaff(); // ✅ Invalidate cache
       
     } catch (error) {
       console.error('Error adding staff:', error);
@@ -313,7 +263,7 @@ const AdminPanel = () => {
       });
       
       showMessage('success', `${staffMember.name} ${staffMember.active ? 'deactivated' : 'activated'}`);
-      loadStaff();
+      invalidateStaff(); // ✅ Invalidate cache
       
     } catch (error) {
       console.error('Error toggling staff:', error);
@@ -386,7 +336,7 @@ const AdminPanel = () => {
       await batch.commit();
       
       showMessage('success', `${action}: ${data.length} students processed`);
-      loadStudentCount();
+      invalidateStudents(); // ✅ Invalidate cache
       
     } catch (error) {
       console.error('Error importing students:', error);
@@ -419,7 +369,7 @@ const AdminPanel = () => {
       showMessage('success', `Added ${newStudent.name} successfully`);
       setNewStudent({ id: '', name: '' });
       setShowAddStudent(false);
-      loadStudentCount();
+      invalidateStudents(); // ✅ Invalidate cache
       
     } catch (error) {
       console.error('Error adding student:', error);
@@ -504,7 +454,7 @@ const AdminPanel = () => {
             </select>
           </div>
 
-          {exportCount !== null && (
+          {exportCount !== null && !exportCountLoading && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <p className="text-sm text-blue-800">
                 Ready to export <strong>{exportCount.toLocaleString()}</strong> passes
@@ -642,31 +592,37 @@ const AdminPanel = () => {
           {/* Current Staff */}
           <div>
             <h3 className="text-sm font-medium text-gray-700 mb-3">
-              Current Staff ({staff.length} total)
+              Current Staff ({staffLoading ? '...' : staff.length} total)
             </h3>
-            <div className="border rounded-lg divide-y max-h-96 overflow-y-auto">
-              {staff.map((s) => (
-                <div key={s.id} className="p-3 flex items-center justify-between hover:bg-gray-50">
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-800">{s.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {s.email} • Room {s.room || 'N/A'} • {s.role}
-                    </p>
+            {staffLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <RefreshCw size={24} className="animate-spin text-indigo-600" />
+              </div>
+            ) : (
+              <div className="border rounded-lg divide-y max-h-96 overflow-y-auto">
+                {staff.map((s) => (
+                  <div key={s.id} className="p-3 flex items-center justify-between hover:bg-gray-50">
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-800">{s.name}</p>
+                      <p className="text-sm text-gray-500">
+                        {s.email} • Room {s.room || 'N/A'} • {s.role}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleStaffActive(s)}
+                      disabled={loading}
+                      className={`px-3 py-1 rounded text-sm font-medium ${
+                        s.active
+                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {s.active ? 'Active' : 'Inactive'}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleToggleStaffActive(s)}
-                    disabled={loading}
-                    className={`px-3 py-1 rounded text-sm font-medium ${
-                      s.active
-                        ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {s.active ? 'Active' : 'Inactive'}
-                  </button>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </Section>
@@ -767,7 +723,7 @@ const AdminPanel = () => {
           {/* Student Count */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-800">
-              <strong>{studentCount.toLocaleString()}</strong> students in database
+              <strong>{studentCountLoading ? '...' : studentCount.toLocaleString()}</strong> students in database
             </p>
           </div>
         </div>
