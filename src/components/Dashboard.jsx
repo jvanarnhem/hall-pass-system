@@ -43,30 +43,9 @@ import {
   updateDoc,
   deleteDoc,
   setDoc,
+  limit,
 } from "firebase/firestore";
 import { db } from "../firebase/config";
-
-// Simple cache for TodayView
-const todayPassesCache = {
-  data: null,
-  timestamp: null,
-  isValid() {
-    if (!this.data || !this.timestamp) return false;
-    const age = Date.now() - this.timestamp;
-    return age < 2 * 60 * 1000; // Cache valid for 2 minutes
-  },
-  set(data) {
-    this.data = data;
-    this.timestamp = Date.now();
-  },
-  get() {
-    return this.isValid() ? this.data : null;
-  },
-  clear() {
-    this.data = null;
-    this.timestamp = null;
-  },
-};
 
 // --- EditPassDialog Component (from your file) ---
 const EditPassDialog = ({ pass, onClose, onSave }) => {
@@ -649,10 +628,11 @@ const AnalyticsView = () => {
     }
   };
 
-  const loadStudentDetails = async (studentId) => {
+  const loadStudentDetails = async (studentId, loadMore = false) => {
     if (!studentId) return;
 
-    if (studentResult?.detailsVisible) {
+    // Toggle hide if already visible and not loading more
+    if (studentResult?.detailsVisible && !loadMore) {
       setStudentResult((prev) => ({ ...prev, detailsVisible: false }));
       return;
     }
@@ -669,17 +649,23 @@ const AnalyticsView = () => {
 
       const since = periodStart(days);
 
+      // ✅ OPTIMIZATION: Add pagination with limit
+      const PASSES_PER_PAGE = 25;
+      const currentCount = loadMore ? (studentResult?.passHistory?.length || 0) : 0;
+
       const qActive = query(
         collection(db, COLLECTIONS.ACTIVE_PASSES),
         where("studentId", "==", studentId),
         where("checkOutTime", ">=", Timestamp.fromDate(since)),
-        orderBy("checkOutTime", "desc")
+        orderBy("checkOutTime", "desc"),
+        limit(PASSES_PER_PAGE + currentCount)
       );
       const qHistCreated = query(
         collection(db, COLLECTIONS.PASS_HISTORY),
         where("studentId", "==", studentId),
         where("createdAt", ">=", Timestamp.fromDate(since)),
-        orderBy("createdAt", "desc")
+        orderBy("createdAt", "desc"),
+        limit(PASSES_PER_PAGE + currentCount)
       );
 
       const [snapA, snapH] = await Promise.all([
@@ -757,11 +743,17 @@ const AnalyticsView = () => {
         };
       });
 
+      // ✅ Track if there are more passes to load
+      const totalPassCount = snapA.size + snapH.size;
+      const hasMore = totalPassCount > passHistory.length;
+
       setStudentResult((prev) => ({
         ...prev,
         loadingDetails: false,
         detailsVisible: true,
         passHistory,
+        hasMorePasses: hasMore,
+        totalAvailable: totalPassCount,
       }));
     } catch (err) {
       console.error("Error loading student details:", err);
@@ -919,7 +911,10 @@ const AnalyticsView = () => {
                 {studentResult.detailsVisible && studentResult.passHistory && (
                   <div className="mt-4 border-t-2 border-indigo-200 pt-4">
                     <h4 className="font-semibold text-gray-800 mb-3">
-                      Pass History ({studentResult.passHistory.length} passes)
+                      Pass History ({studentResult.passHistory.length}
+                      {studentResult.totalAvailable && studentResult.totalAvailable > studentResult.passHistory.length
+                        ? ` of ${studentResult.totalAvailable}`
+                        : ''} passes)
                     </h4>
 
                     {studentResult.passHistory.length === 0 ? (
@@ -927,7 +922,8 @@ const AnalyticsView = () => {
                         No pass history found
                       </p>
                     ) : (
-                      <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                      <>
+                        <div className="space-y-3 max-h-[600px] overflow-y-auto">
                         {studentResult.passHistory.map((pass, index) => {
                           const isOut = pass.status === "OUT";
 
@@ -1030,6 +1026,27 @@ const AnalyticsView = () => {
                           );
                         })}
                       </div>
+
+                      {/* ✅ Load More Button */}
+                      {studentResult.hasMorePasses && (
+                        <div className="mt-4 flex justify-center">
+                          <button
+                            onClick={() => loadStudentDetails(studentResult.studentId, true)}
+                            disabled={studentResult.loadingDetails}
+                            className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-gray-400 flex items-center gap-2"
+                          >
+                            {studentResult.loadingDetails ? (
+                              <>
+                                <RefreshCw size={16} className="animate-spin" />
+                                Loading...
+                              </>
+                            ) : (
+                              <>Load More Passes</>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                      </>
                     )}
                   </div>
                 )}

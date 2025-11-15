@@ -5,14 +5,16 @@ import { LogOut, AlertCircle, CheckCircle, RefreshCw } from "lucide-react";
 import { TIMEOUTS } from "../constants";
 import {
   getStudent,
-  getDestinations,
   getSystemSettings,
   createCheckout,
 } from "../firebase/db";
-import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "../firebase/config";
+import { useDestinations, useStaffList } from "../hooks/usePassQueries";
 
 const StudentCheckOut = ({ roomNumber }) => {
+  // ✅ Use React Query hooks for cached data
+  const { data: destinationsData = [], isLoading: destinationsLoading } = useDestinations();
+  const { data: staffData = [], isLoading: staffLoading } = useStaffList();
+
   // State variables
   const [systemSettings, setSystemSettings] = useState(null);
   const [checkoutBlocked, setCheckoutBlocked] = useState(false);
@@ -23,10 +25,14 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [destinations, setDestinations] = useState([]);
-  const [staffList, setStaffList] = useState([]);
   const [filteredStaff, setFilteredStaff] = useState([]);
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
+
+  // ✅ Derive staff list and destinations from React Query
+  const destinations = destinationsData.map((d) => d.name);
+  const staffList = staffData
+    .filter((s) => s.active)
+    .map((s) => s.dropdownText || s.name);
 
   // Helper Function
   const checkIfCheckoutAllowed = (settings) => {
@@ -54,46 +60,28 @@ const StudentCheckOut = ({ roomNumber }) => {
     return true;
   };
 
-  // Load data on mount - NO AUTH REQUIRED
+  // ✅ Initialize filtered staff when staff list loads
   useEffect(() => {
-    const loadData = async () => {
+    if (staffList.length > 0) {
+      setFilteredStaff(staffList);
+    }
+  }, [staffList]);
+
+  // Load system settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
       try {
-        // Load destinations
-        const destResult = await getDestinations();
-        if (destResult.success && destResult.destinations) {
-          const destNames = destResult.destinations.map((d) => d.name);
-          setDestinations(destNames);
-        } else {
-          setDestinations(["Restroom", "Nurse", "Guidance", "Other"]);
-        }
-
-        // Load staff - NO orderBy to avoid composite index requirement
-        const staffQuery = query(
-          collection(db, "staff"),
-          where("active", "==", true)
-        );
-        const staffSnapshot = await getDocs(staffQuery);
-        const staffData = staffSnapshot.docs.map((doc) => doc.data());
-
-        // Sort in JavaScript instead of Firestore
-        staffData.sort((a, b) => a.name.localeCompare(b.name));
-
-        const staff = staffData.map((s) => s.dropdownText || s.name);
-        setStaffList(staff);
-        setFilteredStaff(staff);
-
-        // Load system settings
         const settingsResult = await getSystemSettings();
         if (settingsResult.success) {
           setSystemSettings(settingsResult.settings);
           checkIfCheckoutAllowed(settingsResult.settings);
         }
       } catch (error) {
-        console.error("Error loading data:", error);
+        console.error("Error loading settings:", error);
       }
     };
 
-    loadData();
+    loadSettings();
   }, []);
 
   const handleStaffSearch = (searchText) => {

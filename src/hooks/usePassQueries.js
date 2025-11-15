@@ -33,37 +33,32 @@ const getPeriodStart = (days) => {
   return d;
 };
 
-// ===== TODAY PASSES QUERY =====
+// ===== TODAY PASSES QUERY (OPTIMIZED) =====
 export const useTodayPasses = () => {
   return useQuery({
     queryKey: [QUERY_KEYS.todayPasses],
     queryFn: async () => {
-      console.log("🔄 React Query: Fetching today passes");
+      console.log("🔄 React Query: Fetching today passes (optimized)");
       const todayStart = getTodayStart();
 
+      // ✅ OPTIMIZATION: Reduced from 3 queries to 2 queries
+      // - Active passes (all active, regardless of time - they're always relevant)
+      // - History created today (catches all passes that started today)
       const qActive = query(
         collection(db, COLLECTIONS.ACTIVE_PASSES),
         where("status", "==", "OUT"),
-        where("checkOutTime", ">=", Timestamp.fromDate(todayStart)),
         orderBy("checkOutTime", "desc")
       );
 
-      const qHistIn = query(
-        collection(db, COLLECTIONS.PASS_HISTORY),
-        where("checkInTime", ">=", Timestamp.fromDate(todayStart)),
-        orderBy("checkInTime", "desc")
-      );
-
-      const qHistOutToday = query(
+      const qHistToday = query(
         collection(db, COLLECTIONS.PASS_HISTORY),
         where("createdAt", ">=", Timestamp.fromDate(todayStart)),
         orderBy("createdAt", "desc")
       );
 
-      const [snapA, snapHIn, snapHOutToday] = await Promise.all([
+      const [snapA, snapH] = await Promise.all([
         getDocs(qActive),
-        getDocs(qHistIn),
-        getDocs(qHistOutToday),
+        getDocs(qHistToday),
       ]);
 
       const rows = [];
@@ -80,17 +75,18 @@ export const useTodayPasses = () => {
       };
 
       snapA.docs.forEach((d) => rows.push(toRow(d, "active")));
-      snapHIn.docs.forEach((d) => rows.push(toRow(d, "history")));
-      snapHOutToday.docs.forEach((d) => rows.push(toRow(d, "history")));
 
-      // De-dupe
-      const byKey = new Map();
-      for (const r of rows) {
-        const key = `${r.source}:${r.id}`;
-        if (!byKey.has(key)) byKey.set(key, r);
-      }
+      // Only include history passes from today
+      snapH.docs.forEach((d) => {
+        const row = toRow(d, "history");
+        // Filter: only include if it was created today
+        if (row._createdISO && new Date(row._createdISO) >= todayStart) {
+          rows.push(row);
+        }
+      });
 
-      const merged = Array.from(byKey.values()).sort((a, b) => {
+      // Sort by most recent activity
+      const merged = rows.sort((a, b) => {
         const ta = new Date(
           a._checkInISO || a._createdISO || a._checkOutISO || 0
         ).getTime();
@@ -100,22 +96,24 @@ export const useTodayPasses = () => {
         return tb - ta;
       });
 
-      console.log("💾 React Query: Today passes cached");
+      console.log(`💾 React Query: Today passes cached (${snapA.size} active + ${snapH.size} history = ${merged.length} total)`);
       return merged;
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
   });
 };
 
-// ===== ANALYTICS QUERY =====
+// ===== ANALYTICS QUERY (OPTIMIZED) =====
 export const useAnalytics = (days = 30) => {
   return useQuery({
     queryKey: QUERY_KEYS.analytics(days),
     queryFn: async () => {
-      console.log(`🔄 React Query: Fetching analytics for ${days} days`);
+      console.log(`🔄 React Query: Fetching analytics for ${days} days (optimized)`);
       const since = getPeriodStart(days);
       const todayStart = getTodayStart();
 
+      // ✅ OPTIMIZATION: Reduced from 5 queries to 3 queries
+      // We fetch period data once, then derive "today" data client-side
       const qActivePeriod = query(
         collection(db, COLLECTIONS.ACTIVE_PASSES),
         where("status", "==", "OUT"),
@@ -135,32 +133,12 @@ export const useAnalytics = (days = 30) => {
         orderBy("createdAt", "desc")
       );
 
-      const qActiveToday = query(
-        collection(db, COLLECTIONS.ACTIVE_PASSES),
-        where("status", "==", "OUT"),
-        where("checkOutTime", ">=", Timestamp.fromDate(todayStart)),
-        orderBy("checkOutTime", "desc")
-      );
-
-      const qHistOutToday = query(
-        collection(db, COLLECTIONS.PASS_HISTORY),
-        where("createdAt", ">=", Timestamp.fromDate(todayStart)),
-        orderBy("createdAt", "desc")
-      );
-
-      const [
-        snapActivePeriod,
-        snapHistInPeriod,
-        snapHistOutPeriod,
-        snapActiveToday,
-        snapHistOutToday,
-      ] = await Promise.all([
-        getDocs(qActivePeriod),
-        getDocs(qHistInPeriod),
-        getDocs(qHistOutPeriod),
-        getDocs(qActiveToday),
-        getDocs(qHistOutToday),
-      ]);
+      const [snapActivePeriod, snapHistInPeriod, snapHistOutPeriod] =
+        await Promise.all([
+          getDocs(qActivePeriod),
+          getDocs(qHistInPeriod),
+          getDocs(qHistOutPeriod),
+        ]);
 
       const asRow = (docSnap, source) => {
         const x = docSnap.data();
@@ -191,7 +169,7 @@ export const useAnalytics = (days = 30) => {
         };
       };
 
-      // Period rows
+      // Period rows (de-duped)
       const rowsPeriod = [];
       snapActivePeriod.docs.forEach((d) => rowsPeriod.push(asRow(d, "active")));
       const histMap = new Map();
@@ -203,7 +181,7 @@ export const useAnalytics = (days = 30) => {
       });
       rowsPeriod.push(...histMap.values());
 
-      // Frequent users
+      // Frequent users (period)
       const startedInPeriod = rowsPeriod.filter(
         (r) => r.checkOutISO || r.createdAtISO
       );
@@ -223,10 +201,12 @@ export const useAnalytics = (days = 30) => {
         (a, b) => b.count - a.count
       );
 
-      // Daily multiple
-      const todayRows = [];
-      snapActiveToday.docs.forEach((d) => todayRows.push(asRow(d, "active")));
-      snapHistOutToday.docs.forEach((d) => todayRows.push(asRow(d, "history")));
+      // ✅ OPTIMIZATION: Derive today data from period data (no extra queries)
+      const todayRows = rowsPeriod.filter((r) => {
+        const createdDate = r.createdAtISO ? new Date(r.createdAtISO) : null;
+        return createdDate && createdDate >= todayStart;
+      });
+
       const byStudentToday = new Map();
       for (const r of todayRows) {
         const key = r.studentId || r.name;
@@ -243,7 +223,9 @@ export const useAnalytics = (days = 30) => {
         (a, b) => b.count - a.count
       );
 
-      console.log(`💾 React Query: Analytics cached for ${days} days`);
+      console.log(
+        `💾 React Query: Analytics cached for ${days} days (${rowsPeriod.length} period, ${todayRows.length} today)`
+      );
       return { frequentUsers, dailyMultiple, periodDays: days };
     },
     staleTime: 5 * 60 * 1000, // 5 minutes (analytics changes less frequently)
@@ -267,6 +249,29 @@ export const useStaffList = () => {
       return staffData;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+};
+
+// ===== DESTINATIONS QUERY (NEW - for global caching) =====
+export const useDestinations = () => {
+  return useQuery({
+    queryKey: ["destinations"],
+    queryFn: async () => {
+      console.log("🔄 React Query: Fetching destinations");
+      const q = query(
+        collection(db, COLLECTIONS.DESTINATIONS),
+        where("active", "==", true),
+        orderBy("order")
+      );
+      const snapshot = await getDocs(q);
+      const destinations = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      console.log("💾 React Query: Destinations cached");
+      return destinations;
+    },
+    staleTime: 30 * 60 * 1000, // 30 minutes (destinations change rarely)
   });
 };
 
