@@ -141,17 +141,101 @@ async function deleteActiveTestPasses() {
   }
 }
 
-// Main execution
+// Add this function to your deleteTestPasses.js
+
+async function findAndDeleteDuplicates() {
+  try {
+    console.log('🔍 Searching for duplicate passes in passHistory...\n');
+
+    const historySnapshot = await db.collection('passHistory').get();
+    
+    // Group by studentId + checkOutTime + checkInTime
+    const groupedPasses = new Map();
+    
+    historySnapshot.docs.forEach(doc => {
+      const data = doc.data();
+      const key = `${data.studentId}-${data.checkOutTime?.toMillis()}-${data.checkInTime?.toMillis()}`;
+      
+      if (!groupedPasses.has(key)) {
+        groupedPasses.set(key, []);
+      }
+      groupedPasses.get(key).push({ id: doc.id, data });
+    });
+
+    // Find duplicates (groups with more than 1 pass)
+    const duplicates = [];
+    groupedPasses.forEach((passes, key) => {
+      if (passes.length > 1) {
+        // Keep the first one, mark others as duplicates
+        duplicates.push(...passes.slice(1));
+      }
+    });
+
+    if (duplicates.length === 0) {
+      console.log('✅ No duplicate passes found!\n');
+      return;
+    }
+
+    console.log(`Found ${duplicates.length} duplicate passes:\n`);
+    console.log('─────────────────────────────────────────────────');
+    
+    duplicates.slice(0, 10).forEach(dup => {
+      console.log(`- ${dup.data.studentName} (${dup.data.studentId})`);
+      console.log(`  Out: ${dup.data.checkOutTime?.toDate().toLocaleString()}`);
+      console.log(`  In: ${dup.data.checkInTime?.toDate().toLocaleString()}`);
+      console.log('');
+    });
+
+    if (duplicates.length > 10) {
+      console.log(`... and ${duplicates.length - 10} more\n`);
+    }
+
+    const answer = await question(`\n⚠️  DELETE ${duplicates.length} duplicate passes? (yes/no): `);
+
+    if (answer.toLowerCase() !== 'yes') {
+      console.log('❌ Deletion cancelled.');
+      return;
+    }
+
+    console.log('\n🗑️  Deleting duplicates...');
+
+    const batchSize = 500;
+    let deletedCount = 0;
+
+    for (let i = 0; i < duplicates.length; i += batchSize) {
+      const batch = db.batch();
+      const batchDocs = duplicates.slice(i, i + batchSize);
+
+      batchDocs.forEach(dup => {
+        batch.delete(db.collection('passHistory').doc(dup.id));
+      });
+
+      await batch.commit();
+      deletedCount += batchDocs.length;
+      console.log(`   Deleted ${deletedCount}/${duplicates.length} duplicates...`);
+    }
+
+    console.log(`\n✅ Successfully deleted ${deletedCount} duplicate passes!`);
+
+  } catch (error) {
+    console.error('❌ Error finding duplicates:', error.message);
+  }
+}
+
+// Update the main() function to include duplicate detection
 async function main() {
   console.log('═══════════════════════════════════════════════════');
-  console.log('  🧹 Test Pass Cleanup Script');
-  console.log('═══════════════════════════════════════════════════');
-  console.log(`  Target Student IDs: ${TEST_STUDENT_IDS.join(', ')}`);
+  console.log('  🧹 Pass Cleanup Script');
   console.log('═══════════════════════════════════════════════════\n');
 
-  // Delete from both collections
+  // Check for test passes
+  console.log('1️⃣  Checking for test student passes...');
   await deleteActiveTestPasses();
   await deleteTestPasses();
+
+  // Check for duplicates
+  console.log('\n2️⃣  Checking for duplicate passes...');
+  await findAndDeleteDuplicates();
 
   console.log('\n✨ Cleanup complete!\n');
 }

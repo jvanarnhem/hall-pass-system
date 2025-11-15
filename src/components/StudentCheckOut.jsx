@@ -152,6 +152,7 @@ const StudentCheckOut = ({ roomNumber }) => {
 
     try {
       // ✅ Add server-side duplicate check
+      /*
       const activePassesQuery = query(
         collection(db, "activePasses"),
         where("studentId", "==", studentId),
@@ -168,7 +169,7 @@ const StudentCheckOut = ({ roomNumber }) => {
         setSubmitting(false);
         return;
       }
-
+      */
       // Verify student exists
       const studentCheck = await getStudent(studentId);
 
