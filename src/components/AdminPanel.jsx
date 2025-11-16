@@ -477,6 +477,9 @@ const AdminPanel = () => {
         duration: d.duration || '',
         status: d.status || '',
         autoCheckedIn: d.autoCheckedIn ? 'Yes' : 'No',
+        note: d.note || '',
+        noteAddedBy: d.noteAddedBy || '',
+        noteAddedAt: d.noteAddedAt ? formatDateForCSV(d.noteAddedAt) : '',
       };
     });
   };
@@ -495,7 +498,7 @@ const AdminPanel = () => {
 
       const filename = `passHistory_${exportStartDate}_to_${exportEndDate}.csv`;
       exportToCSV(data, filename);
-      showMessage('success', `Exported ${data.length} passes to CSV`);
+      showMessage('success', `Exported ${data.length.toLocaleString()} passes to CSV`);
 
     } catch (error) {
       console.error('Error exporting to CSV:', error);
@@ -518,7 +521,7 @@ const AdminPanel = () => {
       }
 
       // Convert data to TSV format (tab-separated values) for Google Sheets
-      const headers = ['Student ID', 'Student Name', 'Room From', 'Destination', 'Custom Destination', 'Check Out Time', 'Check In Time', 'Duration (min)', 'Status', 'Auto Checked In'];
+      const headers = ['Student ID', 'Student Name', 'Room From', 'Destination', 'Custom Destination', 'Check Out Time', 'Check In Time', 'Duration (min)', 'Status', 'Auto Checked In', 'Note', 'Note Added By', 'Note Added At'];
       const rows = data.map(row => [
         row.studentId,
         row.studentName,
@@ -529,10 +532,27 @@ const AdminPanel = () => {
         row.checkInTime,
         row.duration,
         row.status,
-        row.autoCheckedIn
+        row.autoCheckedIn,
+        row.note,
+        row.noteAddedBy,
+        row.noteAddedAt
       ]);
 
       const tsvContent = [headers, ...rows].map(row => row.join('\t')).join('\n');
+
+      // Check size (warn if very large, though clipboard should handle it)
+      const sizeInMB = new Blob([tsvContent]).size / (1024 * 1024);
+      if (sizeInMB > 5) {
+        const proceed = window.confirm(
+          `This export is quite large (${sizeInMB.toFixed(1)} MB, ${data.length.toLocaleString()} passes). ` +
+          `It may take a moment to copy. Continue with Google Sheets export?\n\n` +
+          `Tip: Consider using CSV export for very large datasets.`
+        );
+        if (!proceed) {
+          setLoading(false);
+          return;
+        }
+      }
 
       // Copy to clipboard
       await navigator.clipboard.writeText(tsvContent);
@@ -541,7 +561,7 @@ const AdminPanel = () => {
       const sheetsUrl = 'https://docs.google.com/spreadsheets/create';
       window.open(sheetsUrl, '_blank');
 
-      showMessage('success', `Copied ${data.length} passes to clipboard. Paste into the new Google Sheet (Ctrl+V or Cmd+V)`);
+      showMessage('success', `Copied ${data.length.toLocaleString()} passes to clipboard. Paste into the new Google Sheet (Ctrl+V or Cmd+V)`);
 
     } catch (error) {
       console.error('Error exporting to Google Sheets:', error);
