@@ -28,11 +28,14 @@ const StudentCheckOut = ({ roomNumber }) => {
   const [filteredStaff, setFilteredStaff] = useState([]);
   const [showStaffDropdown, setShowStaffDropdown] = useState(false);
 
-  // ✅ Derive staff list and destinations from React Query
-  const destinations = destinationsData.map((d) => d.name);
-  const staffList = staffData
-    .filter((s) => s.active)
-    .map((s) => s.dropdownText || s.name);
+  // ✅ Derive destinations from React Query (useMemo to avoid re-creating array)
+  const destinations = React.useMemo(() => destinationsData.map((d) => d.name), [destinationsData]);
+
+  // ✅ Derive staff list from React Query (useMemo to avoid re-creating array)
+  const staffList = React.useMemo(
+    () => staffData.filter((s) => s.active).map((s) => s.dropdownText || s.name),
+    [staffData]
+  );
 
   // Helper Function
   const checkIfCheckoutAllowed = (settings) => {
@@ -60,7 +63,7 @@ const StudentCheckOut = ({ roomNumber }) => {
     return true;
   };
 
-  // ✅ Initialize filtered staff when staff list loads
+  // ✅ Initialize filtered staff when staff list loads (now stable with useMemo)
   useEffect(() => {
     if (staffList.length > 0) {
       setFilteredStaff(staffList);
@@ -106,7 +109,6 @@ const StudentCheckOut = ({ roomNumber }) => {
   const handleSubmit = async () => {
     // ✅ Prevent double submission at the very start
     if (submitting || loading) {
-      console.log("⚠️ Already submitting, ignoring duplicate click");
       return;
     }
 

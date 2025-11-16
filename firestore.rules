@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+
+    // Check if user is authenticated with @ofcs.net email
+    function isAuthenticated() {
+      return request.auth != null && request.auth.token.email.matches('.*@ofcs\\.net$');
+    }
+
+    // Check if user is a staff member
+    function isStaff() {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/staff/$(request.auth.token.email));
+    }
+
+    // Check if user is an admin
+    function isAdmin() {
+      return isStaff() &&
+             get(/databases/$(database)/documents/staff/$(request.auth.token.email)).data.role == 'admin';
+    }
+
+    // ============================================
+    // STUDENTS COLLECTION
+    // ============================================
+    match /students/{studentId} {
+      // Anyone can read student data (needed for student check-out page)
+      allow read: if true;
+
+      // Only admins can create, update, or delete students
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ============================================
+    // STAFF COLLECTION
+    // ============================================
+    match /staff/{email} {
+      // Staff can read their own document or any document if they're staff
+      allow read: if isStaff();
+
+      // Only admins can create, update, or delete staff
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ============================================
+    // ACTIVE PASSES COLLECTION
+    // ============================================
+    match /activePasses/{passId} {
+      // Anyone can create a pass (students checking out)
+      allow create: if true;
+
+      // Staff can read all active passes
+      allow read: if isStaff();
+
+      // Staff can update passes (for notes, edits)
+      allow update: if isStaff();
+
+      // Staff can delete passes (check-in moves to history)
+      allow delete: if isStaff();
+    }
+
+    // ============================================
+    // PASS HISTORY COLLECTION
+    // ============================================
+    match /passHistory/{historyId} {
+      // Staff can read all history
+      allow read: if isStaff();
+
+      // Only staff can create history (check-in process)
+      allow create: if isStaff();
+
+      // Staff can update history (for adding notes)
+      allow update: if isStaff();
+
+      // Only admins can delete history
+      allow delete: if isAdmin();
+    }
+
+    // ============================================
+    // DESTINATIONS COLLECTION
+    // ============================================
+    match /destinations/{destinationId} {
+      // Anyone can read destinations (needed for student check-out)
+      allow read: if true;
+
+      // Only admins can create, update, or delete destinations
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ============================================
+    // SETTINGS COLLECTION
+    // ============================================
+    match /settings/{settingId} {
+      // Anyone can read settings (needed for maxCheckoutMinutes, etc.)
+      allow read: if true;
+
+      // Only admins can update settings
+      allow update: if isAdmin();
+
+      // Only admins can create settings
+      allow create: if isAdmin();
+
+      // Prevent deletion of settings
+      allow delete: if false;
+    }
+
+    // ============================================
+    // DENY ALL OTHER COLLECTIONS
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

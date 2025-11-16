@@ -116,6 +116,10 @@ export const createCheckout = async (
       checkOutTime: serverTimestamp(),
       status: "OUT",
       createdAt: serverTimestamp(),
+      // Note fields (initially empty)
+      note: null,
+      noteAddedBy: null,
+      noteAddedAt: null,
     };
 
     const docRef = await addDoc(

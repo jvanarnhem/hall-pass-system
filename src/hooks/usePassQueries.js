@@ -25,6 +25,12 @@ const getTodayStart = () => {
   return d;
 };
 
+// Helper to get start of a specific date (YYYY-MM-DD string)
+const getDateStart = (dateString) => {
+  const d = new Date(dateString + 'T00:00:00'); // Parse as local time
+  return d;
+};
+
 // Helper to get period start
 const getPeriodStart = (days) => {
   const d = new Date();
@@ -33,33 +39,46 @@ const getPeriodStart = (days) => {
   return d;
 };
 
-// ===== TODAY PASSES QUERY (OPTIMIZED) =====
-export const useTodayPasses = () => {
+// ===== HISTORY PASSES QUERY (OPTIMIZED - accepts date parameter) =====
+export const useTodayPasses = (selectedDate = null) => {
+  // If no date provided, use today
+  const dateToUse = selectedDate || new Date().toISOString().split('T')[0];
+
   return useQuery({
-    queryKey: [QUERY_KEYS.todayPasses],
+    queryKey: [QUERY_KEYS.todayPasses, dateToUse],
     queryFn: async () => {
-      console.log("🔄 React Query: Fetching today passes (optimized)");
-      const todayStart = getTodayStart();
+      const dayStart = selectedDate ? getDateStart(selectedDate) : getTodayStart();
 
-      // ✅ OPTIMIZATION: Reduced from 3 queries to 2 queries
-      // - Active passes (all active, regardless of time - they're always relevant)
-      // - History created today (catches all passes that started today)
-      const qActive = query(
-        collection(db, COLLECTIONS.ACTIVE_PASSES),
-        where("status", "==", "OUT"),
-        orderBy("checkOutTime", "desc")
-      );
+      // Get end of day (23:59:59.999)
+      const dayEnd = new Date(dayStart);
+      dayEnd.setHours(23, 59, 59, 999);
 
-      const qHistToday = query(
+      // ✅ Query logic:
+      // - For today: fetch active passes + history from today
+      // - For past dates: only fetch history from that date
+      const isToday = dateToUse === new Date().toISOString().split('T')[0];
+
+      let snapA = { docs: [] }; // Empty by default for past dates
+
+      // Only query active passes if viewing today
+      if (isToday) {
+        const qActive = query(
+          collection(db, COLLECTIONS.ACTIVE_PASSES),
+          where("status", "==", "OUT"),
+          orderBy("checkOutTime", "desc")
+        );
+        snapA = await getDocs(qActive);
+      }
+
+      // Query history for the selected date range (start to end of day)
+      const qHistDay = query(
         collection(db, COLLECTIONS.PASS_HISTORY),
-        where("createdAt", ">=", Timestamp.fromDate(todayStart)),
+        where("createdAt", ">=", Timestamp.fromDate(dayStart)),
+        where("createdAt", "<=", Timestamp.fromDate(dayEnd)),
         orderBy("createdAt", "desc")
       );
 
-      const [snapA, snapH] = await Promise.all([
-        getDocs(qActive),
-        getDocs(qHistToday),
-      ]);
+      const snapH = await getDocs(qHistDay);
 
       const rows = [];
       const toRow = (d, source) => {
@@ -76,13 +95,9 @@ export const useTodayPasses = () => {
 
       snapA.docs.forEach((d) => rows.push(toRow(d, "active")));
 
-      // Only include history passes from today
+      // Add all history passes from the query (already filtered by date range)
       snapH.docs.forEach((d) => {
-        const row = toRow(d, "history");
-        // Filter: only include if it was created today
-        if (row._createdISO && new Date(row._createdISO) >= todayStart) {
-          rows.push(row);
-        }
+        rows.push(toRow(d, "history"));
       });
 
       // Sort by most recent activity
@@ -96,7 +111,6 @@ export const useTodayPasses = () => {
         return tb - ta;
       });
 
-      console.log(`💾 React Query: Today passes cached (${snapA.size} active + ${snapH.size} history = ${merged.length} total)`);
       return merged;
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
@@ -108,7 +122,6 @@ export const useAnalytics = (days = 30) => {
   return useQuery({
     queryKey: QUERY_KEYS.analytics(days),
     queryFn: async () => {
-      console.log(`🔄 React Query: Fetching analytics for ${days} days (optimized)`);
       const since = getPeriodStart(days);
       const todayStart = getTodayStart();
 
@@ -223,10 +236,57 @@ export const useAnalytics = (days = 30) => {
         (a, b) => b.count - a.count
       );
 
-      console.log(
-        `💾 React Query: Analytics cached for ${days} days (${rowsPeriod.length} period, ${todayRows.length} today)`
-      );
-      return { frequentUsers, dailyMultiple, periodDays: days };
+      // ===== TIME OF DAY ANALYSIS (8am-3pm hourly buckets) =====
+      const timeOfDayData = Array.from({ length: 8 }, (_, i) => ({
+        hour: 8 + i,
+        label: `${8 + i}:00`,
+        count: 0,
+      }));
+
+      for (const r of rowsPeriod) {
+        const checkOutDate = r.checkOutISO ? new Date(r.checkOutISO) : null;
+        if (checkOutDate) {
+          const hour = checkOutDate.getHours();
+          if (hour >= 8 && hour <= 15) {
+            timeOfDayData[hour - 8].count++;
+          }
+        }
+      }
+
+      // ===== DESTINATION FREQUENCY ANALYSIS =====
+      const destinationCounts = new Map();
+      for (const r of rowsPeriod) {
+        let dest = r.destination || "";
+        const destLower = dest.toLowerCase();
+
+        // Group destinations: Keep Restroom, Nurse, Guidance separate; everything else goes to "Other"
+        if (destLower === "restroom") {
+          dest = "Restroom";
+        } else if (destLower === "nurse") {
+          dest = "Nurse";
+        } else if (destLower === "guidance") {
+          dest = "Guidance";
+        } else {
+          dest = "Other";
+        }
+
+        if (dest) {
+          const current = destinationCounts.get(dest) || 0;
+          destinationCounts.set(dest, current + 1);
+        }
+      }
+
+      const destinationData = Array.from(destinationCounts.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+
+      return {
+        frequentUsers,
+        dailyMultiple,
+        periodDays: days,
+        timeOfDayData,
+        destinationData,
+      };
     },
     staleTime: 5 * 60 * 1000, // 5 minutes (analytics changes less frequently)
   });
@@ -238,14 +298,12 @@ export const useStaffList = () => {
   return useQuery({
     queryKey: ["staffList"],
     queryFn: async () => {
-      console.log("🔄 React Query: Fetching staff list");
       const snapshot = await getDocs(collection(db, COLLECTIONS.STAFF));
       const staffData = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
       staffData.sort((a, b) => a.name.localeCompare(b.name));
-      console.log("💾 React Query: Staff list cached");
       return staffData;
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -257,7 +315,6 @@ export const useDestinations = () => {
   return useQuery({
     queryKey: ["destinations"],
     queryFn: async () => {
-      console.log("🔄 React Query: Fetching destinations");
       const q = query(
         collection(db, COLLECTIONS.DESTINATIONS),
         where("active", "==", true),
@@ -268,7 +325,6 @@ export const useDestinations = () => {
         id: doc.id,
         ...doc.data(),
       }));
-      console.log("💾 React Query: Destinations cached");
       return destinations;
     },
     staleTime: 30 * 60 * 1000, // 30 minutes (destinations change rarely)
@@ -279,9 +335,7 @@ export const useStudentCount = () => {
   return useQuery({
     queryKey: ["studentCount"],
     queryFn: async () => {
-      console.log("🔄 React Query: Fetching student count");
       const snapshot = await getDocs(collection(db, COLLECTIONS.STUDENTS));
-      console.log("💾 React Query: Student count cached");
       return snapshot.size;
     },
     staleTime: 10 * 60 * 1000, // 10 minutes (changes less frequently)
@@ -292,9 +346,6 @@ export const useExportCount = (exportDays) => {
   return useQuery({
     queryKey: ["exportCount", exportDays],
     queryFn: async () => {
-      console.log(
-        `🔄 React Query: Calculating export count for ${exportDays} days`
-      );
       let q;
 
       if (exportDays === "all") {
@@ -311,9 +362,6 @@ export const useExportCount = (exportDays) => {
       }
 
       const snapshot = await getDocs(q);
-      console.log(
-        `💾 React Query: Export count cached (${snapshot.size} passes)`
-      );
       return snapshot.size;
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
@@ -327,28 +375,21 @@ export const useInvalidateQueries = () => {
 
   return {
     invalidateTodayPasses: () => {
-      console.log("🗑️ React Query: Invalidating today passes cache");
       queryClient.invalidateQueries({ queryKey: [QUERY_KEYS.todayPasses] });
     },
     invalidateAnalytics: () => {
-      console.log("🗑️ React Query: Invalidating analytics cache");
       queryClient.invalidateQueries({ queryKey: ["analytics"] });
     },
     invalidateAll: () => {
-      console.log("🗑️ React Query: Invalidating all caches");
       queryClient.invalidateQueries();
     },
-    // Add these inside useInvalidateQueries hook:
     invalidateStaff: () => {
-      console.log("🗑️ React Query: Invalidating staff cache");
       queryClient.invalidateQueries({ queryKey: ["staffList"] });
     },
     invalidateStudents: () => {
-      console.log("🗑️ React Query: Invalidating student cache");
       queryClient.invalidateQueries({ queryKey: ["studentCount"] });
     },
     invalidateExport: () => {
-      console.log("🗑️ React Query: Invalidating export count cache");
       queryClient.invalidateQueries({ queryKey: ["exportCount"] });
     },
   };
