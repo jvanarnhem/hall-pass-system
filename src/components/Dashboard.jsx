@@ -262,10 +262,13 @@ const EditPassDialog = ({ pass, onClose, onSave, userEmail }) => {
 
 // --- HISTORY VIEW (formerly TodayView - now with date picker) ---
 const TodayView = ({ userRole, userRoom, userEmail }) => {
-  // Date picker state - defaults to today
+  // Date picker state - defaults to today (in local timezone)
   const getTodayString = () => {
     const today = new Date();
-    return today.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`; // YYYY-MM-DD format in local time
   };
 
   const [selectedDate, setSelectedDate] = useState(getTodayString());

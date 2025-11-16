@@ -41,8 +41,17 @@ const getPeriodStart = (days) => {
 
 // ===== HISTORY PASSES QUERY (OPTIMIZED - accepts date parameter) =====
 export const useTodayPasses = (selectedDate = null) => {
-  // If no date provided, use today
-  const dateToUse = selectedDate || new Date().toISOString().split('T')[0];
+  // Helper to get today's date string in local timezone
+  const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // If no date provided, use today (in local timezone)
+  const dateToUse = selectedDate || getTodayDateString();
 
   return useQuery({
     queryKey: [QUERY_KEYS.todayPasses, dateToUse],
@@ -56,7 +65,7 @@ export const useTodayPasses = (selectedDate = null) => {
       // ✅ Query logic:
       // - For today: fetch active passes + history from today
       // - For past dates: only fetch history from that date
-      const isToday = dateToUse === new Date().toISOString().split('T')[0];
+      const isToday = dateToUse === getTodayDateString();
 
       let snapA = { docs: [] }; // Empty by default for past dates
 
