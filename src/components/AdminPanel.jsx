@@ -17,6 +17,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Settings,
+  FileSpreadsheet,
+  Calendar,
 } from 'lucide-react';
 import {
   collection,
@@ -37,7 +39,6 @@ import { parseCSV, exportToCSV, formatDateForCSV } from '../utils/csvHelpers';
 import {
   useStaffList,
   useStudentCount,
-  useExportCount,
   useInvalidateQueries
 } from '../hooks/usePassQueries';
 
@@ -282,9 +283,26 @@ const AdminPanel = () => {
   const { data: studentCount = 0, isLoading: studentCountLoading } = useStudentCount();
   const { invalidateStaff, invalidateStudents } = useInvalidateQueries();
 
-  // Export state
-  const [exportDays, setExportDays] = useState(30);
-  const { data: exportCount = null, isLoading: exportCountLoading } = useExportCount(exportDays);
+  // Export state - date range instead of days
+  const getTodayString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getDateDaysAgo = (days) => {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [exportStartDate, setExportStartDate] = useState(getDateDaysAgo(30));
+  const [exportEndDate, setExportEndDate] = useState(getTodayString());
 
   // Staff state
   const [showAddStaff, setShowAddStaff] = useState(false);
@@ -428,62 +446,106 @@ const AdminPanel = () => {
   // EXPORT FUNCTIONS
   // ============================================
 
-  const handleExport = async () => {
+  // Fetch pass data for export based on date range
+  const fetchPassDataForExport = async () => {
+    const startDate = new Date(exportStartDate + 'T00:00:00');
+    const endDate = new Date(exportEndDate + 'T23:59:59.999');
+
+    const q = query(
+      collection(db, COLLECTIONS.PASS_HISTORY),
+      where('createdAt', '>=', Timestamp.fromDate(startDate)),
+      where('createdAt', '<=', Timestamp.fromDate(endDate)),
+      firestoreOrderBy('createdAt', 'desc')
+    );
+
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    return snapshot.docs.map(doc => {
+      const d = doc.data();
+      return {
+        studentId: d.studentId || '',
+        studentName: d.studentName || '',
+        roomFrom: d.roomFrom || '',
+        destination: d.destination || '',
+        customDestination: d.customDestination || '',
+        checkOutTime: formatDateForCSV(d.checkOutTime),
+        checkInTime: formatDateForCSV(d.checkInTime),
+        duration: d.duration || '',
+        status: d.status || '',
+        autoCheckedIn: d.autoCheckedIn ? 'Yes' : 'No',
+      };
+    });
+  };
+
+  const handleExportCSV = async () => {
     setLoading(true);
-    
+
     try {
-      let q;
-      
-      if (exportDays === 'all') {
-        q = query(
-          collection(db, COLLECTIONS.PASS_HISTORY),
-          firestoreOrderBy('createdAt', 'desc')
-        );
-      } else {
-        const since = new Date();
-        since.setDate(since.getDate() - exportDays);
-        since.setHours(0, 0, 0, 0);
-        
-        q = query(
-          collection(db, COLLECTIONS.PASS_HISTORY),
-          where('createdAt', '>=', Timestamp.fromDate(since)),
-          firestoreOrderBy('createdAt', 'desc')
-        );
-      }
-      
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) {
-        showMessage('error', 'No passes found to export');
+      const data = await fetchPassDataForExport();
+
+      if (!data) {
+        showMessage('error', 'No passes found in selected date range');
         setLoading(false);
         return;
       }
 
-      const data = snapshot.docs.map(doc => {
-        const d = doc.data();
-        return {
-          studentId: d.studentId || '',
-          studentName: d.studentName || '',
-          roomFrom: d.roomFrom || '',
-          destination: d.destination || '',
-          customDestination: d.customDestination || '',
-          checkOutTime: formatDateForCSV(d.checkOutTime),
-          checkInTime: formatDateForCSV(d.checkInTime),
-          duration: d.duration || '',
-          status: d.status || '',
-          autoCheckedIn: d.autoCheckedIn ? 'Yes' : 'No',
-        };
-      });
-
-      const today = new Date().toISOString().split('T')[0];
-      const filename = `passHistory_${today}.csv`;
-      
+      const filename = `passHistory_${exportStartDate}_to_${exportEndDate}.csv`;
       exportToCSV(data, filename);
-      showMessage('success', `Exported ${data.length} passes successfully`);
-      
+      showMessage('success', `Exported ${data.length} passes to CSV`);
+
     } catch (error) {
-      console.error('Error exporting:', error);
-      showMessage('error', 'Export failed: ' + error.message);
+      console.error('Error exporting to CSV:', error);
+      showMessage('error', 'CSV export failed: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportGoogleSheets = async () => {
+    setLoading(true);
+
+    try {
+      const data = await fetchPassDataForExport();
+
+      if (!data) {
+        showMessage('error', 'No passes found in selected date range');
+        setLoading(false);
+        return;
+      }
+
+      // Convert data to TSV format (tab-separated values) for Google Sheets
+      const headers = ['Student ID', 'Student Name', 'Room From', 'Destination', 'Custom Destination', 'Check Out Time', 'Check In Time', 'Duration (min)', 'Status', 'Auto Checked In'];
+      const rows = data.map(row => [
+        row.studentId,
+        row.studentName,
+        row.roomFrom,
+        row.destination,
+        row.customDestination,
+        row.checkOutTime,
+        row.checkInTime,
+        row.duration,
+        row.status,
+        row.autoCheckedIn
+      ]);
+
+      const tsvContent = [headers, ...rows].map(row => row.join('\t')).join('\n');
+
+      // Copy to clipboard
+      await navigator.clipboard.writeText(tsvContent);
+
+      // Open Google Sheets in a new tab
+      const sheetsUrl = 'https://docs.google.com/spreadsheets/create';
+      window.open(sheetsUrl, '_blank');
+
+      showMessage('success', `Copied ${data.length} passes to clipboard. Paste into the new Google Sheet (Ctrl+V or Cmd+V)`);
+
+    } catch (error) {
+      console.error('Error exporting to Google Sheets:', error);
+      showMessage('error', 'Google Sheets export failed: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -1104,50 +1166,118 @@ const AdminPanel = () => {
         onToggle={() => setExpandedSection(expandedSection === 'export' ? null : 'export')}
       >
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Time Period
-            </label>
-            <select
-              value={exportDays}
-              onChange={(e) => setExportDays(e.target.value)}
-              className="w-full md:w-64 px-4 py-2 border rounded-lg bg-white"
-              disabled={loading}
-            >
-              <option value={7}>Last 7 days</option>
-              <option value={14}>Last 14 days</option>
-              <option value={30}>Last 30 days</option>
-              <option value={60}>Last 60 days</option>
-              <option value={90}>Last 90 days</option>
-              <option value="all">All Time</option>
-            </select>
+          {/* Date Range Pickers */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Calendar size={16} className="inline mr-1" />
+                Start Date
+              </label>
+              <input
+                type="date"
+                value={exportStartDate}
+                onChange={(e) => setExportStartDate(e.target.value)}
+                max={exportEndDate}
+                className="w-full px-4 py-2 border rounded-lg bg-white"
+                disabled={loading}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Calendar size={16} className="inline mr-1" />
+                End Date
+              </label>
+              <input
+                type="date"
+                value={exportEndDate}
+                onChange={(e) => setExportEndDate(e.target.value)}
+                min={exportStartDate}
+                max={getTodayString()}
+                className="w-full px-4 py-2 border rounded-lg bg-white"
+                disabled={loading}
+              />
+            </div>
           </div>
 
-          {exportCount !== null && !exportCountLoading && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-800">
-                Ready to export <strong>{exportCount.toLocaleString()}</strong> passes
-              </p>
-            </div>
-          )}
+          {/* Quick Select Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                setExportStartDate(getDateDaysAgo(7));
+                setExportEndDate(getTodayString());
+              }}
+              className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              disabled={loading}
+            >
+              Last 7 days
+            </button>
+            <button
+              onClick={() => {
+                setExportStartDate(getDateDaysAgo(30));
+                setExportEndDate(getTodayString());
+              }}
+              className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              disabled={loading}
+            >
+              Last 30 days
+            </button>
+            <button
+              onClick={() => {
+                setExportStartDate(getDateDaysAgo(90));
+                setExportEndDate(getTodayString());
+              }}
+              className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              disabled={loading}
+            >
+              Last 90 days
+            </button>
+          </div>
 
-          <button
-            onClick={handleExport}
-            disabled={loading || exportCount === 0}
-            className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {loading ? (
-              <>
-                <RefreshCw size={18} className="animate-spin" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download size={18} />
-                Export to CSV
-              </>
-            )}
-          </button>
+          {/* Export Buttons */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={handleExportCSV}
+              disabled={loading}
+              className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw size={18} className="animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download size={18} />
+                  Export to CSV
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleExportGoogleSheets}
+              disabled={loading}
+              className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw size={18} className="animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet size={18} />
+                  Export to Google Sheets
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              <strong>Google Sheets:</strong> Data will be copied to clipboard and a new Google Sheet will open. Simply paste (Ctrl+V or Cmd+V) into the sheet.
+            </p>
+          </div>
         </div>
       </Section>
 
